@@ -589,6 +589,15 @@ void GMainWindow::InitializeWidgets() {
     setStyleSheet(QStringLiteral("QStatusBar::item{border: none;}"));
 
     QActionGroup* actionGroup_ScreenLayouts = new QActionGroup(this);
+    // Initialize Deck-Upad Action
+    action_Screen_Layout_DeckUpadStreaming = new QAction(this);
+    action_Screen_Layout_DeckUpadStreaming->setText(tr("Deck-Upad Streaming"));
+    action_Screen_Layout_DeckUpadStreaming->setCheckable(true);
+
+    // Insert it into the View -> Screen Layout menu
+    // We insert it before the "Rotate Screens Upright" action so it sits above the separator
+    ui->menu_Screen_Layout->insertAction(ui->action_Screen_Layout_Upright_Screens, action_Screen_Layout_DeckUpadStreaming);
+
     actionGroup_ScreenLayouts->addAction(ui->action_Screen_Layout_Default);
     actionGroup_ScreenLayouts->addAction(ui->action_Screen_Layout_Single_Screen);
     actionGroup_ScreenLayouts->addAction(ui->action_Screen_Layout_Large_Screen);
@@ -596,6 +605,8 @@ void GMainWindow::InitializeWidgets() {
     actionGroup_ScreenLayouts->addAction(ui->action_Screen_Layout_Separate_Windows);
     actionGroup_ScreenLayouts->addAction(ui->action_Screen_Layout_Hybrid_Screen);
     actionGroup_ScreenLayouts->addAction(ui->action_Screen_Layout_Custom_Layout);
+    // Add this line:
+    actionGroup_ScreenLayouts->addAction(action_Screen_Layout_DeckUpadStreaming);
 
     QActionGroup* actionGroup_SmallPositions = new QActionGroup(this);
     actionGroup_SmallPositions->addAction(ui->action_Small_Screen_TopRight);
@@ -1069,6 +1080,7 @@ void GMainWindow::ConnectMenuEvents() {
     connect_menu(ui->action_Screen_Layout_Side_by_Side, &GMainWindow::ChangeScreenLayout);
     connect_menu(ui->action_Screen_Layout_Separate_Windows, &GMainWindow::ChangeScreenLayout);
     connect_menu(ui->action_Screen_Layout_Custom_Layout, &GMainWindow::ChangeScreenLayout);
+    connect_menu(action_Screen_Layout_DeckUpadStreaming, &GMainWindow::ChangeScreenLayout);
     connect_menu(ui->action_Screen_Layout_Swap_Screens, &GMainWindow::OnSwapScreens);
     connect_menu(ui->action_Screen_Layout_Upright_Screens, &GMainWindow::OnRotateScreens);
     connect_menu(ui->action_Small_Screen_TopRight, &GMainWindow::ChangeSmallScreenPosition);
@@ -2632,7 +2644,10 @@ void GMainWindow::ChangeScreenLayout() {
         new_layout = Settings::LayoutOption::SeparateWindows;
     } else if (ui->action_Screen_Layout_Custom_Layout->isChecked()) {
         new_layout = Settings::LayoutOption::CustomLayout;
+    } else if (action_Screen_Layout_DeckUpadStreaming->isChecked()) {
+        new_layout = Settings::LayoutOption::DeckUpadStreaming;
     }
+
 
     Settings::values.layout_option = new_layout;
     SyncMenuUISettings();
@@ -2727,6 +2742,8 @@ void GMainWindow::ToggleScreenLayout() {
         case Settings::LayoutOption::SeparateWindows:
             return Settings::LayoutOption::CustomLayout;
         case Settings::LayoutOption::CustomLayout:
+            return Settings::LayoutOption::DeckUpadStreaming;
+        case Settings::LayoutOption::DeckUpadStreaming:
             return Settings::LayoutOption::Default;
         default:
             LOG_ERROR(Frontend, "Unknown layout option {}",
@@ -4112,6 +4129,8 @@ void GMainWindow::SyncMenuUISettings() {
         Settings::values.layout_option.GetValue() == Settings::LayoutOption::SeparateWindows);
     ui->action_Screen_Layout_Custom_Layout->setChecked(Settings::values.layout_option.GetValue() ==
                                                        Settings::LayoutOption::CustomLayout);
+    action_Screen_Layout_DeckUpadStreaming->setChecked(Settings::values.layout_option.GetValue() ==
+    Settings::LayoutOption::DeckUpadStreaming);
     ui->action_Screen_Layout_Swap_Screens->setChecked(Settings::values.swap_screen.GetValue());
     ui->action_Screen_Layout_Upright_Screens->setChecked(
         Settings::values.upright_screen.GetValue());

@@ -44,6 +44,7 @@ enum class LayoutOption : u32 {
 #endif
     HybridScreen,
     CustomLayout,
+    DeckUpadStreaming,
 };
 
 /** Defines the layout option for mobile portrait */

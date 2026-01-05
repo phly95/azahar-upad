@@ -15,7 +15,7 @@
 ConfigureLayout::ConfigureLayout(QWidget* parent)
     : QWidget(parent), ui(std::make_unique<Ui::ConfigureLayout>()) {
     ui->setupUi(this);
-
+    ui->layout_combobox->addItem(tr("Deck-Upad Streaming"));
     SetupPerGameUI();
     SetConfiguration();
 

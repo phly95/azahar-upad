@@ -792,6 +792,98 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
 
     screen_info.image_view = src_surface.ImageView();
 
+    // --- Deck-Upad: Copy to Exportable Image ---
+    if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
+        if (screen_info.texture.image) {
+            scheduler.Record([src_image = src_surface.Image(),
+                             dst_image = screen_info.texture.image,
+                             src_extent = src_surface.RealExtent(),
+                             dst_width = screen_info.texture.width,
+                             dst_height = screen_info.texture.height
+            ](vk::CommandBuffer cmdbuf) {
+
+                // 1. Prepare Destination
+                vk::ImageMemoryBarrier dst_barrier;
+                dst_barrier.srcAccessMask = vk::AccessFlagBits::eNone;
+                dst_barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+                dst_barrier.oldLayout = vk::ImageLayout::eUndefined;
+                dst_barrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
+                dst_barrier.image = dst_image;
+                dst_barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+                dst_barrier.subresourceRange.levelCount = 1;
+                dst_barrier.subresourceRange.layerCount = 1;
+
+                cmdbuf.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer,
+                    vk::DependencyFlagBits::eByRegion, {}, {}, dst_barrier
+                );
+
+                // 2. DEBUG: Clear to Magenta (Pink) using correct C++ initialization
+                // This syntax works with vulkan.hpp unions
+                const vk::ClearColorValue pink = {
+                    .float32 = std::array{1.0f, 0.0f, 1.0f, 1.0f}
+                };
+
+                vk::ImageSubresourceRange range;
+                range.aspectMask = vk::ImageAspectFlagBits::eColor;
+                range.levelCount = 1;
+                range.layerCount = 1;
+
+                cmdbuf.clearColorImage(dst_image, vk::ImageLayout::eTransferDstOptimal, pink, range);
+
+                // 3. Prepare Source
+                vk::ImageMemoryBarrier src_barrier;
+                src_barrier.srcAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eColorAttachmentWrite;
+                src_barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+                src_barrier.oldLayout = vk::ImageLayout::eGeneral;
+                src_barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+                src_barrier.image = src_image;
+                src_barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+                src_barrier.subresourceRange.levelCount = 1;
+                src_barrier.subresourceRange.layerCount = 1;
+
+                cmdbuf.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer,
+                    vk::DependencyFlagBits::eByRegion, {}, {}, src_barrier
+                );
+
+                // 4. Perform Blit
+                vk::ImageBlit blit;
+                blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+                blit.srcSubresource.layerCount = 1;
+                blit.srcOffsets[1] = vk::Offset3D{ (int32_t)src_extent.width, (int32_t)src_extent.height, 1 };
+
+                blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+                blit.dstSubresource.layerCount = 1;
+                blit.dstOffsets[1] = vk::Offset3D{ (int32_t)dst_width, (int32_t)dst_height, 1 };
+
+                cmdbuf.blitImage(
+                    src_image, vk::ImageLayout::eTransferSrcOptimal,
+                    dst_image, vk::ImageLayout::eTransferDstOptimal,
+                    blit, vk::Filter::eLinear
+                );
+
+                // 5. Restore Layouts
+                src_barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+                src_barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+                src_barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+                src_barrier.newLayout = vk::ImageLayout::eGeneral;
+
+                dst_barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+                dst_barrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead;
+                dst_barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+                dst_barrier.newLayout = vk::ImageLayout::eGeneral;
+
+                cmdbuf.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
+                    vk::DependencyFlagBits::eByRegion, {}, {},
+                    {src_barrier, dst_barrier}
+                );
+            });
+        }
+    }
+    // ================== PASTE END ==================
+
     return true;
 }
 

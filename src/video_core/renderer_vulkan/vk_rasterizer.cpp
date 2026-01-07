@@ -795,14 +795,22 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
     // --- Deck-Upad: Copy to Exportable Image ---
     if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
         if (screen_info.texture.image) {
+
+            // 1. End the current RenderPass to ensure the source image is available for transfer
+            renderpass_cache.EndRendering();
+
+            // Capture src_rect by value for the lambda
+            const auto copy_rect = src_rect;
+
             scheduler.Record([src_image = src_surface.Image(),
                              dst_image = screen_info.texture.image,
-                             src_extent = src_surface.RealExtent(),
+                             // Use copy_rect, NOT src_extent
+                             copy_rect,
                              dst_width = screen_info.texture.width,
                              dst_height = screen_info.texture.height
             ](vk::CommandBuffer cmdbuf) {
 
-                // 1. Prepare Destination (Undefined -> TransferDst)
+                // 2. Prepare Destination (Undefined -> TransferDst)
                 vk::ImageMemoryBarrier dst_barrier;
                 dst_barrier.srcAccessMask = vk::AccessFlagBits::eNone;
                 dst_barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
@@ -813,23 +821,19 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
                 dst_barrier.subresourceRange.levelCount = 1;
                 dst_barrier.subresourceRange.layerCount = 1;
 
-                // 2. Prepare Source (ColorAtt -> TransferSrc)
+                // 3. Prepare Source (General -> TransferSrc)
+                // EndRendering() leaves images in eGeneral layout.
                 vk::ImageMemoryBarrier src_barrier;
-                // We must wait for ColorAttachmentWrite to finish before reading
                 src_barrier.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
                 src_barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-
-                // IMPORTANT FIX: The source image was just rendered to, so it is in AttachmentOptimal layout.
-                // Creating a barrier from eGeneral (when it's not) invalidates data on AMD.
-                src_barrier.oldLayout = vk::ImageLayout::eColorAttachmentOptimal;
-
+                src_barrier.oldLayout = vk::ImageLayout::eGeneral;
                 src_barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
                 src_barrier.image = src_image;
                 src_barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
                 src_barrier.subresourceRange.levelCount = 1;
                 src_barrier.subresourceRange.layerCount = 1;
 
-                // Submit both transitions
+                // Submit transitions
                 cmdbuf.pipelineBarrier(
                     vk::PipelineStageFlagBits::eColorAttachmentOutput,
                     vk::PipelineStageFlagBits::eTransfer,
@@ -837,41 +841,37 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
                     {dst_barrier, src_barrier}
                 );
 
-                // 3. DEBUG: Clear to Magenta (Pink)
-                // This ensures we see *something* if the Blit fails / is commented out.
-                const vk::ClearColorValue pink = {
-                    .float32 = std::array{1.0f, 0.0f, 1.0f, 1.0f}
-                };
+                // 4. Perform Blit
+                vk::ImageBlit blit = {};
+                blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+                blit.srcSubresource.mipLevel = 0;
+                blit.srcSubresource.baseArrayLayer = 0;
+                blit.srcSubresource.layerCount = 1;
 
-                vk::ImageSubresourceRange range;
-                range.aspectMask = vk::ImageAspectFlagBits::eColor;
-                range.levelCount = 1;
-                range.layerCount = 1;
-                cmdbuf.clearColorImage(dst_image, vk::ImageLayout::eTransferDstOptimal, pink, range);
+                // IMPORTANT: Use the copy_rect coordinates, not the full texture extent.
+                // 3DS Textures are often inverted, checking top/bottom ensures we flip correctly if needed.
+                blit.srcOffsets[0] = vk::Offset3D{ (int32_t)copy_rect.left, (int32_t)copy_rect.bottom, 0 };
+                blit.srcOffsets[1] = vk::Offset3D{ (int32_t)copy_rect.right, (int32_t)copy_rect.top, 1 };
 
-                // // 4. Perform Blit
-                // vk::ImageBlit blit;
-                // blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
-                // blit.srcSubresource.layerCount = 1;
-                // blit.srcOffsets[0] = vk::Offset3D{ 0, 0, 0 };
-                // blit.srcOffsets[1] = vk::Offset3D{ (int32_t)src_extent.width, (int32_t)src_extent.height, 1 };
-                //
-                // blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
-                // blit.dstSubresource.layerCount = 1;
-                // blit.dstOffsets[0] = vk::Offset3D{ 0, 0, 0 };
-                // blit.dstOffsets[1] = vk::Offset3D{ (int32_t)dst_width, (int32_t)dst_height, 1 };
-                //
-                // cmdbuf.blitImage(
-                //     src_image, vk::ImageLayout::eTransferSrcOptimal,
-                //     dst_image, vk::ImageLayout::eTransferDstOptimal,
-                //     blit, vk::Filter::eLinear
-                // );
+                blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+                blit.dstSubresource.mipLevel = 0;
+                blit.dstSubresource.baseArrayLayer = 0;
+                blit.dstSubresource.layerCount = 1;
 
-                // 5. Restore Source Layout (TransferSrc -> ColorAtt)
+                blit.dstOffsets[0] = vk::Offset3D{ 0, 0, 0 };
+                blit.dstOffsets[1] = vk::Offset3D{ (int32_t)dst_width, (int32_t)dst_height, 1 };
+
+                cmdbuf.blitImage(
+                    src_image, vk::ImageLayout::eTransferSrcOptimal,
+                    dst_image, vk::ImageLayout::eTransferDstOptimal,
+                    blit, vk::Filter::eLinear
+                );
+
+                // 5. Restore Source Layout (TransferSrc -> General)
                 src_barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
-                src_barrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+                src_barrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead;
                 src_barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
-                src_barrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+                src_barrier.newLayout = vk::ImageLayout::eGeneral;
 
                 // 6. Restore Destination Layout (TransferDst -> General)
                 dst_barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
@@ -881,7 +881,7 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
 
                 cmdbuf.pipelineBarrier(
                     vk::PipelineStageFlagBits::eTransfer,
-                    vk::PipelineStageFlagBits::eAllCommands, // Broad wait to be safe
+                    vk::PipelineStageFlagBits::eAllCommands,
                     vk::DependencyFlagBits::eByRegion, {}, {},
                     {src_barrier, dst_barrier}
                 );

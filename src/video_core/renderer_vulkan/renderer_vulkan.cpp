@@ -220,6 +220,16 @@ static bool IsLowRefreshRate() {
 }
 } // Anonymous namespace
 
+// --- Deck-Upad: State Tracking (File Scope) ---
+namespace {
+    vk::Image g_last_sent_image = nullptr;
+    u32 g_last_sent_width = 0;
+    u32 g_last_sent_height = 0;
+    uint64_t g_last_sent_modifier = 0;
+    uint32_t g_last_sent_generation = 0;
+}
+// ----------------------------------------------
+
 RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
                                Frontend::EmuWindow& window, Frontend::EmuWindow* secondary_window)
     : RendererBase{system, window, secondary_window}, memory{system.Memory()}, pica{pica_},
@@ -239,6 +249,15 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
                                          update_queue,
                                          main_present_window.ImageCount()},
       present_heap{instance, scheduler.GetMasterSemaphore(), PRESENT_BINDINGS, 32} {
+
+
+    // >>> INSERT THIS: Reset streaming state on startup <<<
+    g_last_sent_image = nullptr;
+    g_last_sent_width = 0;
+    g_last_sent_height = 0;
+    g_last_sent_modifier = 0;
+    g_last_sent_generation = 0;
+    // ----------------------------------------------------
     CompileShaders();
     BuildLayouts();
     BuildPipelines();
@@ -662,6 +681,7 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         }
     }
     // =================================================================================
+    texture.generation++;
 
     const vk::ImageViewCreateInfo view_info = {
         .image = texture.image,
@@ -1020,6 +1040,7 @@ void RendererVulkan::DrawBottomScreen(const Layout::FramebufferLayout& layout,
     }
 }
 
+
 void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout,
                                  bool flipped) {
 
@@ -1031,24 +1052,26 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
 
         const auto& target_screen = screen_infos[target_index].texture;
 
-        static vk::Image last_sent_image = nullptr;
-        static u32 last_sent_width = 0;
-        static u32 last_sent_height = 0;
-
-        // Check if we actually need to send a new packet
         bool needs_update = false;
-        if (target_screen.image && target_screen.image != last_sent_image) {
-            LOG_INFO(Render_Vulkan, "DeckUpad: Image Handle changed. Resending.");
+
+        // CHECK GENERATION FIRST. This catches handle reuse.
+        if (target_screen.generation != g_last_sent_generation) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Texture Generation changed (Reallocation). Resending.");
             needs_update = true;
-        } else if (target_screen.width != last_sent_width || target_screen.height != last_sent_height) {
+        }
+        else if (target_screen.image != g_last_sent_image) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Image Handle changed (Screen Swap). Resending.");
+            needs_update = true;
+        } else if (target_screen.width != g_last_sent_width || target_screen.height != g_last_sent_height) {
             LOG_INFO(Render_Vulkan, "DeckUpad: Resolution changed. Resending.");
+            needs_update = true;
+        } else if (target_screen.modifier != g_last_sent_modifier) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Modifier changed. Resending.");
             needs_update = true;
         }
 
         if (needs_update) {
             // 1. FORCE SUBMISSION
-            // We must submit the command buffer so the kernel creates the dma_fences.
-            // Without this, the external process imports an "empty" image.
             scheduler.Flush();
 
             // 2. Export and Send FD
@@ -1084,8 +1107,6 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
                     }
 
                     // 3. Send Metadata + Modifier
-                    // We send the modifier we queried during creation (ConfigureFramebufferTexture)
-                    // so EGL knows exactly how to descramble the Optimal tiling.
                     bool sent = DeckUpad::global_streamer.SendFrame(
                         fd,
                         target_screen.width,
@@ -1095,13 +1116,15 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
                         target_screen.modifier
                     );
 
-                    // Important: Close the FD here to prevent leaks
+                    // Important: Close the FD here
                     close(fd);
 
                     if (sent) {
-                        last_sent_image = target_screen.image;
-                        last_sent_width = target_screen.width;
-                        last_sent_height = target_screen.height;
+                        g_last_sent_image = target_screen.image;
+                        g_last_sent_width = target_screen.width;
+                        g_last_sent_height = target_screen.height;
+                        g_last_sent_modifier = target_screen.modifier;
+                        g_last_sent_generation = target_screen.generation; // <--- UPDATE GENERATION
                         LOG_INFO(Render_Vulkan, "DeckUpad: Frame sent successfully.");
                     }
                 } else {

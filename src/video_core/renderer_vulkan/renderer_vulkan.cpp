@@ -125,7 +125,7 @@ namespace DeckUpad {
         }
 
         // Returns TRUE only if data was actually written to the socket
-        bool SendFrame(int dma_fd, int width, int height, int stride, int format) {
+        bool SendFrame(int dma_fd, int width, int height, int stride, int format, uint64_t modifier) {
             if (!connected) {
                 Connect();
                 // If still not connected, fail
@@ -140,6 +140,7 @@ namespace DeckUpad {
             pkt.format = format;
             pkt.strides[0] = stride;
             pkt.offsets[0] = 0;
+            pkt.modifier = modifier;
 
             struct msghdr msg = {0};
             struct iovec iov = {&pkt, sizeof(pkt)};
@@ -596,10 +597,12 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = vk::SampleCountFlagBits::e1,
-        .usage = vk::ImageUsageFlagBits::eSampled,
+        // Ensure TransferDst is here for the Clear/Blit commands
+        .usage = vk::ImageUsageFlagBits::eSampled |
+                 vk::ImageUsageFlagBits::eTransferSrc |
+                 vk::ImageUsageFlagBits::eTransferDst,
     };
 
-    // Remove 'const' so we can modify flags
     VmaAllocationCreateInfo alloc_info = {
         .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
@@ -609,23 +612,18 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         .pUserData = nullptr,
     };
 
-    // --- Deck-Upad Change: Enable Export ---
+    // --- Deck-Upad: Allocation Settings ---
     vk::ExternalMemoryImageCreateInfo external_info;
     if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
-        // Use DMA_BUF for Linux interop
         external_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
         image_info.pNext = &external_info;
 
-        // Force Linear so CPU can read it linearly
-        image_info.tiling = vk::ImageTiling::eLinear;
+        // 1. OPTIMAL (GPU Friendly, required for AMD Blit)
+        image_info.tiling = vk::ImageTiling::eOptimal;
 
-        // 1. Dedicated Memory (Required for DMABUF export on many drivers)
-        // 2. Host Access (Required for mmap/CPU reading in Python)
-        alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT |
-        VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
-
-        // Force usage to allow CPU mapping preference if possible (overrides 'PREFER_DEVICE')
-        alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+        // 2. DEVICE LOCAL (GPU Friendly)
+        alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+        alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     }
     // ---------------------------------------
 
@@ -639,6 +637,31 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         UNREACHABLE();
     }
     texture.image = vk::Image{unsafe_image};
+
+    // =================================================================================
+    // Deck-Upad: Query the DRM Modifier so Python knows how to descramble Optimal tiling
+    // =================================================================================
+    texture.modifier = 0x00ffffffffffffffULL; // Default to INVALID
+
+    if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
+        // Load the function pointer for the modifier query extension
+        auto func = (PFN_vkGetImageDrmFormatModifierPropertiesEXT)
+                    instance.GetDevice().getProcAddr("vkGetImageDrmFormatModifierPropertiesEXT");
+
+        if (func) {
+            VkImageDrmFormatModifierPropertiesEXT props = {};
+            props.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT;
+
+            // Ask the driver: "What tiling layout did you pick?"
+            if (func(instance.GetDevice(), texture.image, &props) == VK_SUCCESS) {
+                texture.modifier = props.drmFormatModifier;
+                LOG_INFO(Render_Vulkan, "DeckUpad: Texture Created with Modifier: {}", texture.modifier);
+            } else {
+                LOG_ERROR(Render_Vulkan, "DeckUpad: Failed to query texture modifier.");
+            }
+        }
+    }
+    // =================================================================================
 
     const vk::ImageViewCreateInfo view_info = {
         .image = texture.image,
@@ -1023,6 +1046,12 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
         }
 
         if (needs_update) {
+            // 1. FORCE SUBMISSION
+            // We must submit the command buffer so the kernel creates the dma_fences.
+            // Without this, the external process imports an "empty" image.
+            scheduler.Flush();
+
+            // 2. Export and Send FD
             vk::Device d = instance.GetDevice();
 
             VmaAllocationInfo alloc_info_vma;
@@ -1054,14 +1083,19 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
                         drm_format = 0x36314752; // RGB565
                     }
 
+                    // 3. Send Metadata + Modifier
+                    // We send the modifier we queried during creation (ConfigureFramebufferTexture)
+                    // so EGL knows exactly how to descramble the Optimal tiling.
                     bool sent = DeckUpad::global_streamer.SendFrame(
                         fd,
                         target_screen.width,
                         target_screen.height,
                         stride,
-                        drm_format
+                        drm_format,
+                        target_screen.modifier
                     );
 
+                    // Important: Close the FD here to prevent leaks
                     close(fd);
 
                     if (sent) {
@@ -1279,7 +1313,7 @@ void RendererVulkan::RenderScreenshotWithStagingCopy() {
             cmdbuf.pipelineBarrier(
                 vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
                 vk::DependencyFlagBits::eByRegion, memory_write_barrier, {}, write_barrier);
-        });
+    });
 
     // Ensure the copy is fully completed before saving the screenshot
     scheduler.Finish();

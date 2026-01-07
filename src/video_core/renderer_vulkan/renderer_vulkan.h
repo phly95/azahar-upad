@@ -42,6 +42,7 @@ struct TextureInfo {
     vk::Image image;
     vk::ImageView image_view;
     VmaAllocation allocation;
+    uint64_t modifier = 0; // ADD THIS
 };
 
 struct ScreenInfo {

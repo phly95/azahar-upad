@@ -455,6 +455,7 @@ bool Instance::CreateDevice() {
     add_extension(VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME);
     add_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
     add_extension(VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+    add_extension("VK_EXT_image_drm_format_modifier");
     // ---------------------------------------
     shader_stencil_export = add_extension(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
     external_memory_host = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);

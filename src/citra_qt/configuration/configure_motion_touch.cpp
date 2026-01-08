@@ -159,6 +159,12 @@ void ConfigureMotionTouch::SetConfiguration() {
         QString::fromStdString(Settings::values.current_input_profile.udp_input_address));
     ui->udp_port->setText(QString::number(Settings::values.current_input_profile.udp_input_port));
     ui->udp_pad_index->setCurrentIndex(Settings::values.current_input_profile.udp_pad_index);
+    // --- ADD THIS ---
+    ui->udp_use_separate_touch->setChecked(Settings::values.current_input_profile.udp_touch_use_separate);
+    ui->udp_touch_group->setEnabled(Settings::values.current_input_profile.udp_touch_use_separate);
+    ui->udp_touch_server->setText(QString::fromStdString(Settings::values.current_input_profile.udp_touch_address));
+    ui->udp_touch_port->setText(QString::number(Settings::values.current_input_profile.udp_touch_port));
+    // ----------------
 }
 
 void ConfigureMotionTouch::UpdateUiDisplay() {
@@ -201,6 +207,11 @@ void ConfigureMotionTouch::UpdateUiDisplay() {
 }
 
 void ConfigureMotionTouch::ConnectEvents() {
+    // --- ADD THIS ---
+    connect(ui->udp_use_separate_touch, &QCheckBox::toggled, this, [this](bool checked) {
+        ui->udp_touch_group->setEnabled(checked);
+    });
+    // ----------------
     connect(ui->motion_provider, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [this]([[maybe_unused]] int index) { UpdateUiDisplay(); });
     connect(ui->touch_provider, qOverload<int>(&QComboBox::currentIndexChanged), this,
@@ -386,6 +397,14 @@ void ConfigureMotionTouch::ApplyConfiguration() {
         static_cast<u16>(ui->udp_port->text().toInt());
     Settings::values.current_input_profile.udp_pad_index =
         static_cast<u8>(ui->udp_pad_index->currentIndex());
+    // --- ADD THIS ---
+    Settings::values.current_input_profile.udp_touch_use_separate = ui->udp_use_separate_touch->isChecked();
+    Settings::values.current_input_profile.udp_touch_address = ui->udp_touch_server->text().toStdString();
+    Settings::values.current_input_profile.udp_touch_port = static_cast<u16>(ui->udp_touch_port->text().toInt());
+    // We can reuse the same pad index or add a UI element for it.
+    // Usually 0 is fine for touch screens.
+    Settings::values.current_input_profile.udp_touch_pad_index = 0;
+    // ----------------
     Settings::SaveProfile(Settings::values.current_input_profile_index);
     InputCommon::ReloadInputDevices();
 

@@ -16,7 +16,9 @@ public:
     void ReloadUDPClient();
 
 private:
-    std::unique_ptr<Client> client;
+    // Change this from a single client to two
+    std::unique_ptr<Client> client_motion;
+    std::unique_ptr<Client> client_touch;
 };
 
 std::unique_ptr<State> Init();

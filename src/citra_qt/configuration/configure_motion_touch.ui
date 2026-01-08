@@ -296,6 +296,53 @@
           </property>
          </widget>
         </item>
+        <item>
+         <widget class="QCheckBox" name="udp_use_separate_touch">
+          <property name="text">
+           <string>Use Separate UDP Server for Touch</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="udp_touch_group">
+          <property name="title">
+           <string>Touch Server Config</string>
+          </property>
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
+          <layout class="QVBoxLayout">
+           <item>
+            <layout class="QHBoxLayout">
+             <item>
+              <widget class="QLabel" name="udp_touch_server_label">
+               <property name="text">
+                <string>Server:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="udp_touch_server"/>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <layout class="QHBoxLayout">
+             <item>
+              <widget class="QLabel" name="udp_touch_port_label">
+               <property name="text">
+                <string>Port:</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="udp_touch_port"/>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </widget>
+        </item>
        </layout>
       </item>
      </layout>

@@ -14,6 +14,12 @@
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_memory_util.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <drm/drm_fourcc.h> // For DRM_FORMAT_XBGR8888
 
 #include "video_core/host_shaders/vulkan_present_anaglyph_frag.h"
 #include "video_core/host_shaders/vulkan_present_frag.h"
@@ -58,6 +64,119 @@ constexpr static std::array<vk::DescriptorSetLayoutBinding, 1> PRESENT_BINDINGS 
     {0, vk::DescriptorType::eCombinedImageSampler, 3, vk::ShaderStageFlagBits::eFragment},
 }};
 
+// --- Deck-Upad Streaming Helpers ---
+
+#ifndef DRM_FORMAT_ABGR8888
+#define DRM_FORMAT_ABGR8888 0x34324241
+#endif
+
+namespace DeckUpad {
+
+    struct TexturePacket {
+        uint8_t type = 11; // TYPE_TEXTURE_DATA
+        uint8_t nfd = 1;   // Number of FDs
+        int32_t width;
+        int32_t height;
+        int32_t format;     // DRM format
+        int32_t strides[4]; // Stride for each plane
+        int32_t offsets[4]; // Offset for each plane
+        uint64_t modifier = 0; // DRM_FORMAT_MOD_LINEAR (0)
+        uint32_t winid = 0;
+        uint8_t flip = 0;
+        uint32_t color_space = 0;
+        uint8_t pad[65]; // Padding to align to 128 bytes
+    } __attribute__((packed));
+
+    class Streamer {
+    public:
+        int sock_fd = -1;
+        bool connected = false;
+
+        void Connect() {
+            if (connected) return;
+
+            sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (sock_fd < 0) return;
+
+            // Set Non-Blocking
+            int flags = fcntl(sock_fd, F_GETFL, 0);
+            fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK);
+
+            struct sockaddr_un addr;
+            memset(&addr, 0, sizeof(addr));
+            addr.sun_family = AF_UNIX;
+
+            const char* name = "/com/obsproject/vkcapture";
+            addr.sun_path[0] = '\0';
+            strncpy(addr.sun_path + 1, name, sizeof(addr.sun_path) - 2);
+            socklen_t addr_len = sizeof(sa_family_t) + 1 + strlen(name);
+
+            if (connect(sock_fd, (struct sockaddr*)&addr, addr_len) == 0) {
+                connected = true;
+            } else {
+                // Check if in progress (common for non-blocking)
+                if (errno == EINPROGRESS || errno == EALREADY || errno == EISCONN) {
+                    connected = true;
+                } else {
+                    close(sock_fd);
+                    sock_fd = -1;
+                }
+            }
+        }
+
+        // Returns TRUE only if data was actually written to the socket
+        bool SendFrame(int dma_fd, int width, int height, int stride, int format, uint64_t modifier) {
+            if (!connected) {
+                Connect();
+                // If still not connected, fail
+                if (!connected) return false;
+            }
+
+            TexturePacket pkt = {};
+            pkt.type = 11;
+            pkt.nfd = 1;
+            pkt.width = width;
+            pkt.height = height;
+            pkt.format = format;
+            pkt.strides[0] = stride;
+            pkt.offsets[0] = 0;
+            pkt.modifier = modifier;
+
+            struct msghdr msg = {0};
+            struct iovec iov = {&pkt, sizeof(pkt)};
+
+            char buf[CMSG_SPACE(sizeof(int))];
+            memset(buf, 0, sizeof(buf));
+
+            msg.msg_iov = &iov;
+            msg.msg_iovlen = 1;
+            msg.msg_control = buf;
+            msg.msg_controllen = sizeof(buf);
+
+            struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+            cmsg->cmsg_level = SOL_SOCKET;
+            cmsg->cmsg_type = SCM_RIGHTS;
+            cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+            *((int *)CMSG_DATA(cmsg)) = dma_fd;
+
+            if (sendmsg(sock_fd, &msg, 0) < 0) {
+                // If pipe broke or buffer full, reset and fail
+                if (errno == EPIPE || errno == ECONNRESET) {
+                    close(sock_fd);
+                    connected = false;
+                    sock_fd = -1;
+                }
+                return false;
+            }
+            return true;
+        }
+    };
+
+    static Streamer global_streamer;
+} // namespace DeckUpad
+
+// -----------------------------------
+
 namespace {
 static bool IsLowRefreshRate() {
 #if defined(__APPLE__) || defined(ENABLE_SDL2)
@@ -101,6 +220,16 @@ static bool IsLowRefreshRate() {
 }
 } // Anonymous namespace
 
+// --- Deck-Upad: State Tracking (File Scope) ---
+namespace {
+    vk::Image g_last_sent_image = nullptr;
+    u32 g_last_sent_width = 0;
+    u32 g_last_sent_height = 0;
+    uint64_t g_last_sent_modifier = 0;
+    uint32_t g_last_sent_generation = 0;
+}
+// ----------------------------------------------
+
 RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
                                Frontend::EmuWindow& window, Frontend::EmuWindow* secondary_window)
     : RendererBase{system, window, secondary_window}, memory{system.Memory()}, pica{pica_},
@@ -120,6 +249,15 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
                                          update_queue,
                                          main_present_window.ImageCount()},
       present_heap{instance, scheduler.GetMasterSemaphore(), PRESENT_BINDINGS, 32} {
+
+
+    // >>> INSERT THIS: Reset streaming state on startup <<<
+    g_last_sent_image = nullptr;
+    g_last_sent_width = 0;
+    g_last_sent_height = 0;
+    g_last_sent_modifier = 0;
+    g_last_sent_generation = 0;
+    // ----------------------------------------------------
     CompileShaders();
     BuildLayouts();
     BuildPipelines();
@@ -154,6 +292,7 @@ RendererVulkan::~RendererVulkan() {
 void RendererVulkan::PrepareRendertarget() {
     const auto& framebuffer_config = pica.regs.framebuffer_config;
     const auto& regs_lcd = pica.regs_lcd;
+    const u32 scale = GetResolutionScaleFactor();
     for (u32 i = 0; i < 3; i++) {
         const u32 fb_id = i == 2 ? 1 : 0;
         const auto& framebuffer = framebuffer_config[fb_id];
@@ -166,10 +305,13 @@ void RendererVulkan::PrepareRendertarget() {
             continue;
         }
 
-        if (texture.width != framebuffer.width || texture.height != framebuffer.height ||
+        u32 target_width = framebuffer.width * scale;
+        u32 target_height = framebuffer.height * scale;
+
+        if (texture.width != target_width || texture.height != target_height ||
             texture.format != framebuffer.color_format) {
             ConfigureFramebufferTexture(texture, framebuffer);
-        }
+            }
 
         LoadFBToScreenInfo(framebuffer, screen_infos[i], i == 1);
     }
@@ -468,20 +610,31 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         vmaDestroyImage(instance.GetAllocator(), texture.image, texture.allocation);
     }
 
+    // --- INSERT: Get Scale Factor ---
+    const u32 scale = GetResolutionScaleFactor();
+    const u32 scaled_width = framebuffer.width * scale;
+    const u32 scaled_height = framebuffer.height * scale;
+    // --------------------------------
+
     const VideoCore::PixelFormat pixel_format =
-        VideoCore::PixelFormatFromGPUPixelFormat(framebuffer.color_format);
+    VideoCore::PixelFormatFromGPUPixelFormat(framebuffer.color_format);
     const vk::Format format = instance.GetTraits(pixel_format).native;
-    const vk::ImageCreateInfo image_info = {
+
+    vk::ImageCreateInfo image_info = {
         .imageType = vk::ImageType::e2D,
         .format = format,
-        .extent = {framebuffer.width, framebuffer.height, 1},
+        // --- MODIFY: Use Scaled Dimensions ---
+        .extent = {scaled_width, scaled_height, 1},
+        // -------------------------------------
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = vk::SampleCountFlagBits::e1,
-        .usage = vk::ImageUsageFlagBits::eSampled,
+        .usage = vk::ImageUsageFlagBits::eSampled |
+        vk::ImageUsageFlagBits::eTransferSrc |
+        vk::ImageUsageFlagBits::eTransferDst,
     };
 
-    const VmaAllocationCreateInfo alloc_info = {
+    VmaAllocationCreateInfo alloc_info = {
         .flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT,
         .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
         .requiredFlags = 0,
@@ -489,6 +642,30 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         .pool = VK_NULL_HANDLE,
         .pUserData = nullptr,
     };
+
+    // --- Deck-Upad: Allocation Settings ---
+    vk::ExternalMemoryImageCreateInfo external_info;
+    if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
+        external_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
+        image_info.pNext = &external_info;
+
+        // 1. FORCE RGBA8 FORMAT
+        // The 3DS uses RGB565, which GStreamer/Encoders hate.
+        // We force the export buffer to RGBA8. The vkCmdBlitImage later will
+        // automatically convert the colors for us on the GPU.
+        image_info.format = vk::Format::eR8G8B8A8Unorm;
+
+        // 2. Use LINEAR Tiling for maximum compatibility
+        // While Optimal is faster, Linear RGBA8 is universally supported by every
+        // GStreamer version and driver.
+        image_info.tiling = vk::ImageTiling::eLinear;
+
+        // 3. Device Local (GPU VRAM)
+        // Since we are using DMABuf (GPU-to-GPU), we do NOT need Host Visible memory.
+        alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+        alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    }
+    // ---------------------------------------
 
     VkImage unsafe_image{};
     VkImageCreateInfo unsafe_image_info = static_cast<VkImageCreateInfo>(image_info);
@@ -500,6 +677,32 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         UNREACHABLE();
     }
     texture.image = vk::Image{unsafe_image};
+
+    // =================================================================================
+    // Deck-Upad: Query the DRM Modifier so Python knows how to descramble Optimal tiling
+    // =================================================================================
+    texture.modifier = 0x00ffffffffffffffULL; // Default to INVALID
+
+    if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
+        // Load the function pointer for the modifier query extension
+        auto func = (PFN_vkGetImageDrmFormatModifierPropertiesEXT)
+                    instance.GetDevice().getProcAddr("vkGetImageDrmFormatModifierPropertiesEXT");
+
+        if (func) {
+            VkImageDrmFormatModifierPropertiesEXT props = {};
+            props.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT;
+
+            // Ask the driver: "What tiling layout did you pick?"
+            if (func(instance.GetDevice(), texture.image, &props) == VK_SUCCESS) {
+                texture.modifier = props.drmFormatModifier;
+                LOG_INFO(Render_Vulkan, "DeckUpad: Texture Created with Modifier: {}", texture.modifier);
+            } else {
+                LOG_ERROR(Render_Vulkan, "DeckUpad: Failed to query texture modifier.");
+            }
+        }
+    }
+    // =================================================================================
+    texture.generation++;
 
     const vk::ImageViewCreateInfo view_info = {
         .image = texture.image,
@@ -515,10 +718,12 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
     };
     texture.image_view = device.createImageView(view_info);
 
-    texture.width = framebuffer.width;
-    texture.height = framebuffer.height;
+    // --- MODIFY: Save Scaled Dimensions to State ---
+    texture.width = scaled_width;
+    texture.height = scaled_height;
+    // ----------------------------------------------
     texture.format = framebuffer.color_format;
-}
+                                                 }
 
 void RendererVulkan::FillScreen(Common::Vec3<u8> color, const TextureInfo& texture) {
     const vk::ClearColorValue clear_color = {
@@ -858,8 +1063,106 @@ void RendererVulkan::DrawBottomScreen(const Layout::FramebufferLayout& layout,
     }
 }
 
+
 void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout,
                                  bool flipped) {
+
+    // --- Deck-Upad Streaming Logic ---
+    if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
+
+        bool swapped = Settings::values.swap_screen.GetValue();
+        int target_index = swapped ? 0 : 2;
+
+        const auto& target_screen = screen_infos[target_index].texture;
+
+        bool needs_update = false;
+
+        // CHECK GENERATION FIRST. This catches handle reuse.
+        if (target_screen.generation != g_last_sent_generation) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Texture Generation changed (Reallocation). Resending.");
+            needs_update = true;
+        }
+        else if (target_screen.image != g_last_sent_image) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Image Handle changed (Screen Swap). Resending.");
+            needs_update = true;
+        } else if (target_screen.width != g_last_sent_width || target_screen.height != g_last_sent_height) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Resolution changed. Resending.");
+            needs_update = true;
+        } else if (target_screen.modifier != g_last_sent_modifier) {
+            LOG_INFO(Render_Vulkan, "DeckUpad: Modifier changed. Resending.");
+            needs_update = true;
+        }
+
+        if (needs_update) {
+            // 1. FORCE SUBMISSION
+            scheduler.Flush();
+
+            // 2. Export and Send FD
+            vk::Device d = instance.GetDevice();
+
+            VmaAllocationInfo alloc_info_vma;
+            vmaGetAllocationInfo(instance.GetAllocator(), target_screen.allocation, &alloc_info_vma);
+
+            vk::MemoryGetFdInfoKHR fd_info;
+            fd_info.memory = alloc_info_vma.deviceMemory;
+            fd_info.handleType = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
+
+            auto func = (PFN_vkGetMemoryFdKHR)d.getProcAddr("vkGetMemoryFdKHR");
+
+            if (func) {
+                int fd = -1;
+                VkMemoryGetFdInfoKHR c_fd_info = static_cast<VkMemoryGetFdInfoKHR>(fd_info);
+                VkResult res = func(d, &c_fd_info, &fd);
+
+                if (res == VK_SUCCESS) {
+                    vk::ImageSubresource subRes;
+                    subRes.aspectMask = vk::ImageAspectFlagBits::eColor;
+                    subRes.mipLevel = 0;
+                    subRes.arrayLayer = 0;
+
+                    vk::SubresourceLayout layout;
+                    d.getImageSubresourceLayout(target_screen.image, &subRes, &layout);
+
+
+                    int stride = static_cast<int>(layout.rowPitch);
+
+                    // FORCE DRM FORMAT TO ABGR8888
+                    // We forced the VkImage to eR8G8B8A8Unorm (ABGR in DRM) above.
+                    // So we must report that format, regardless of what the Pica core thinks.
+                    int drm_format = 0x34324241; // DRM_FORMAT_ABGR8888
+
+
+                    // 3. Send Metadata + Modifier
+                    bool sent = DeckUpad::global_streamer.SendFrame(
+                        fd,
+                        target_screen.width,
+                        target_screen.height,
+                        stride,
+                        drm_format,
+                        target_screen.modifier
+                    );
+
+                    // Important: Close the FD here
+                    close(fd);
+
+                    if (sent) {
+                        g_last_sent_image = target_screen.image;
+                        g_last_sent_width = target_screen.width;
+                        g_last_sent_height = target_screen.height;
+                        g_last_sent_modifier = target_screen.modifier;
+                        g_last_sent_generation = target_screen.generation; // <--- UPDATE GENERATION
+                        LOG_INFO(Render_Vulkan, "DeckUpad: Frame sent successfully.");
+                    }
+                } else {
+                    LOG_ERROR(Render_Vulkan, "DeckUpad: vkGetMemoryFdKHR failed with code {}", (int)res);
+                }
+            } else {
+                LOG_ERROR(Render_Vulkan, "DeckUpad: Could not load vkGetMemoryFdKHR pointer");
+            }
+        }
+    }
+    // ---------------------------------
+
     if (settings.bg_color_update_requested.exchange(false)) {
         clear_color.float32[0] = Settings::values.bg_red.GetValue();
         clear_color.float32[1] = Settings::values.bg_green.GetValue();
@@ -1059,7 +1362,7 @@ void RendererVulkan::RenderScreenshotWithStagingCopy() {
             cmdbuf.pipelineBarrier(
                 vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
                 vk::DependencyFlagBits::eByRegion, memory_write_barrier, {}, write_barrier);
-        });
+    });
 
     // Ensure the copy is fully completed before saving the screenshot
     scheduler.Finish();

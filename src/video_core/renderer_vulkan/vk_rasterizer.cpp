@@ -776,7 +776,7 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
     src_params.UpdateParams();
 
     const auto [src_surface_id, src_rect] =
-        res_cache.GetSurfaceSubRect(src_params, VideoCore::ScaleMatch::Ignore, true);
+    res_cache.GetSurfaceSubRect(src_params, VideoCore::ScaleMatch::Ignore, true);
 
     if (!src_surface_id) {
         return false;
@@ -788,12 +788,110 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
 
     screen_info.texcoords = Common::Rectangle<f32>(
         (float)src_rect.bottom / (float)scaled_height, (float)src_rect.left / (float)scaled_width,
-        (float)src_rect.top / (float)scaled_height, (float)src_rect.right / (float)scaled_width);
+                                                   (float)src_rect.top / (float)scaled_height, (float)src_rect.right / (float)scaled_width);
 
     screen_info.image_view = src_surface.ImageView();
 
+    // --- Deck-Upad: Copy to Exportable Image ---
+    if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
+        if (screen_info.texture.image) {
+
+            // 1. End the current RenderPass to ensure the source image is available for transfer
+            renderpass_cache.EndRendering();
+
+            // Capture src_rect by value for the lambda
+            const auto copy_rect = src_rect;
+
+            scheduler.Record([src_image = src_surface.Image(),
+                             dst_image = screen_info.texture.image,
+                             // Use copy_rect, NOT src_extent
+                             copy_rect,
+                             dst_width = screen_info.texture.width,
+                             dst_height = screen_info.texture.height
+            ](vk::CommandBuffer cmdbuf) {
+
+                // 2. Prepare Destination (Undefined -> TransferDst)
+                vk::ImageMemoryBarrier dst_barrier;
+                dst_barrier.srcAccessMask = vk::AccessFlagBits::eNone;
+                dst_barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+                dst_barrier.oldLayout = vk::ImageLayout::eUndefined;
+                dst_barrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
+                dst_barrier.image = dst_image;
+                dst_barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+                dst_barrier.subresourceRange.levelCount = 1;
+                dst_barrier.subresourceRange.layerCount = 1;
+
+                // 3. Prepare Source (General -> TransferSrc)
+                // EndRendering() leaves images in eGeneral layout.
+                vk::ImageMemoryBarrier src_barrier;
+                src_barrier.srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+                src_barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+                src_barrier.oldLayout = vk::ImageLayout::eGeneral;
+                src_barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+                src_barrier.image = src_image;
+                src_barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+                src_barrier.subresourceRange.levelCount = 1;
+                src_barrier.subresourceRange.layerCount = 1;
+
+                // Submit transitions
+                cmdbuf.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                    vk::PipelineStageFlagBits::eTransfer,
+                    vk::DependencyFlagBits::eByRegion, {}, {},
+                    {dst_barrier, src_barrier}
+                );
+
+                // 4. Perform Blit
+                vk::ImageBlit blit = {};
+                blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+                blit.srcSubresource.mipLevel = 0;
+                blit.srcSubresource.baseArrayLayer = 0;
+                blit.srcSubresource.layerCount = 1;
+
+                // IMPORTANT: Use the copy_rect coordinates, not the full texture extent.
+                // 3DS Textures are often inverted, checking top/bottom ensures we flip correctly if needed.
+                blit.srcOffsets[0] = vk::Offset3D{ (int32_t)copy_rect.left, (int32_t)copy_rect.bottom, 0 };
+                blit.srcOffsets[1] = vk::Offset3D{ (int32_t)copy_rect.right, (int32_t)copy_rect.top, 1 };
+
+                blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+                blit.dstSubresource.mipLevel = 0;
+                blit.dstSubresource.baseArrayLayer = 0;
+                blit.dstSubresource.layerCount = 1;
+
+                blit.dstOffsets[0] = vk::Offset3D{ 0, 0, 0 };
+                blit.dstOffsets[1] = vk::Offset3D{ (int32_t)dst_width, (int32_t)dst_height, 1 };
+
+                cmdbuf.blitImage(
+                    src_image, vk::ImageLayout::eTransferSrcOptimal,
+                    dst_image, vk::ImageLayout::eTransferDstOptimal,
+                    blit, vk::Filter::eLinear
+                );
+
+                // 5. Restore Source Layout (TransferSrc -> General)
+                src_barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+                src_barrier.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead;
+                src_barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+                src_barrier.newLayout = vk::ImageLayout::eGeneral;
+
+                // 6. Restore Destination Layout (TransferDst -> General)
+                dst_barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+                dst_barrier.dstAccessMask = vk::AccessFlagBits::eMemoryRead;
+                dst_barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+                dst_barrier.newLayout = vk::ImageLayout::eGeneral;
+
+                cmdbuf.pipelineBarrier(
+                    vk::PipelineStageFlagBits::eTransfer,
+                    vk::PipelineStageFlagBits::eAllCommands,
+                    vk::DependencyFlagBits::eByRegion, {}, {},
+                    {src_barrier, dst_barrier}
+                );
+            });
+        }
+    }
+    // ================== PASTE END ==================
+
     return true;
-}
+                                         }
 
 void RasterizerVulkan::MakeSoftwareVertexLayout() {
     constexpr std::array sizes = {4, 4, 2, 2, 2, 1, 4, 3};

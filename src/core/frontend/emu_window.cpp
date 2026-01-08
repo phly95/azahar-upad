@@ -248,6 +248,13 @@ void EmuWindow::UpdateCurrentFramebufferLayout(u32 width, u32 height, bool is_po
         }
     } else {
         switch (layout_option) {
+        case Settings::LayoutOption::DeckUpadStreaming:
+            // Use SingleFrameLayout to render exactly one screen.
+            // Check 'swap_screen' to decide if we render Top or Bottom.
+            layout = Layout::SingleFrameLayout(width, height,
+                                                Settings::values.swap_screen.GetValue(),
+                                                false); // Force upright=false to prevent unwanted rotation logic
+            break;
         case Settings::LayoutOption::CustomLayout:
             layout = Layout::CustomFrameLayout(
                 width, height, Settings::values.swap_screen.GetValue(), is_portrait_mode);

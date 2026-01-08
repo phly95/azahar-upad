@@ -426,6 +426,7 @@ private:
     QAction* action_secondary_toggle_screen;
     QAction* action_secondary_swap_screen;
     QAction* action_secondary_rotate_screen;
+    QAction* action_Screen_Layout_DeckUpadStreaming = nullptr;
 
     QTranslator translator;
 

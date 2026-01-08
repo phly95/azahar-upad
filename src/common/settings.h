@@ -44,6 +44,7 @@ enum class LayoutOption : u32 {
 #endif
     HybridScreen,
     CustomLayout,
+    DeckUpadStreaming,
 };
 
 /** Defines the layout option for mobile portrait */
@@ -441,9 +442,19 @@ struct InputProfile {
     std::string touch_device;
     bool use_touch_from_button;
     int touch_from_button_map_index;
+
+    // Existing (Will serve as Motion/Default)
     std::string udp_input_address;
     u16 udp_input_port;
     u8 udp_pad_index;
+
+    // --- ADD THIS BLOCK ---
+    // Separate configuration for Touch UDP
+    bool udp_touch_use_separate;
+    std::string udp_touch_address;
+    u16 udp_touch_port;
+    u8 udp_touch_pad_index;
+    // ----------------------
 };
 
 struct TouchFromButtonMap {

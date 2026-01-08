@@ -721,6 +721,25 @@ std::pair<unsigned, unsigned> GetMinimumSizeFromLayout(Settings::LayoutOption la
                                           : std::max(largeHeight, smallHeight));
         break;
     }
+    case Settings::LayoutOption::DeckUpadStreaming: {
+        // Get the resolution factor (1x, 2x, 3x...). Default to 1x if set to Auto.
+        u32 factor = Settings::values.resolution_factor.GetValue();
+        if (factor == 0) factor = 1;
+
+        // Check if we are streaming the Bottom (swapped) or Top screen
+        bool swapped = Settings::values.swap_screen.GetValue();
+
+        if (swapped) {
+            // Bottom Screen (320x240 native)
+            min_width = Core::kScreenBottomWidth * factor;
+            min_height = Core::kScreenBottomHeight * factor;
+        } else {
+            // Top Screen (400x240 native)
+            min_width = Core::kScreenTopWidth * factor;
+            min_height = Core::kScreenTopHeight * factor;
+        }
+        break;
+    }
     case Settings::LayoutOption::SideScreen:
         min_width = Core::kScreenTopWidth + Core::kScreenBottomWidth;
         min_height = Core::kScreenBottomHeight;

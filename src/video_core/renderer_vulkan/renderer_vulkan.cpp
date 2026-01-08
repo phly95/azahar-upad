@@ -292,6 +292,7 @@ RendererVulkan::~RendererVulkan() {
 void RendererVulkan::PrepareRendertarget() {
     const auto& framebuffer_config = pica.regs.framebuffer_config;
     const auto& regs_lcd = pica.regs_lcd;
+    const u32 scale = GetResolutionScaleFactor();
     for (u32 i = 0; i < 3; i++) {
         const u32 fb_id = i == 2 ? 1 : 0;
         const auto& framebuffer = framebuffer_config[fb_id];
@@ -304,10 +305,13 @@ void RendererVulkan::PrepareRendertarget() {
             continue;
         }
 
-        if (texture.width != framebuffer.width || texture.height != framebuffer.height ||
+        u32 target_width = framebuffer.width * scale;
+        u32 target_height = framebuffer.height * scale;
+
+        if (texture.width != target_width || texture.height != target_height ||
             texture.format != framebuffer.color_format) {
             ConfigureFramebufferTexture(texture, framebuffer);
-        }
+            }
 
         LoadFBToScreenInfo(framebuffer, screen_infos[i], i == 1);
     }
@@ -606,20 +610,28 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         vmaDestroyImage(instance.GetAllocator(), texture.image, texture.allocation);
     }
 
+    // --- INSERT: Get Scale Factor ---
+    const u32 scale = GetResolutionScaleFactor();
+    const u32 scaled_width = framebuffer.width * scale;
+    const u32 scaled_height = framebuffer.height * scale;
+    // --------------------------------
+
     const VideoCore::PixelFormat pixel_format =
-        VideoCore::PixelFormatFromGPUPixelFormat(framebuffer.color_format);
+    VideoCore::PixelFormatFromGPUPixelFormat(framebuffer.color_format);
     const vk::Format format = instance.GetTraits(pixel_format).native;
+
     vk::ImageCreateInfo image_info = {
         .imageType = vk::ImageType::e2D,
         .format = format,
-        .extent = {framebuffer.width, framebuffer.height, 1},
+        // --- MODIFY: Use Scaled Dimensions ---
+        .extent = {scaled_width, scaled_height, 1},
+        // -------------------------------------
         .mipLevels = 1,
         .arrayLayers = 1,
         .samples = vk::SampleCountFlagBits::e1,
-        // Ensure TransferDst is here for the Clear/Blit commands
         .usage = vk::ImageUsageFlagBits::eSampled |
-                 vk::ImageUsageFlagBits::eTransferSrc |
-                 vk::ImageUsageFlagBits::eTransferDst,
+        vk::ImageUsageFlagBits::eTransferSrc |
+        vk::ImageUsageFlagBits::eTransferDst,
     };
 
     VmaAllocationCreateInfo alloc_info = {
@@ -637,10 +649,19 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
         external_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
         image_info.pNext = &external_info;
 
-        // 1. OPTIMAL (GPU Friendly, required for AMD Blit)
-        image_info.tiling = vk::ImageTiling::eOptimal;
+        // 1. FORCE RGBA8 FORMAT
+        // The 3DS uses RGB565, which GStreamer/Encoders hate.
+        // We force the export buffer to RGBA8. The vkCmdBlitImage later will
+        // automatically convert the colors for us on the GPU.
+        image_info.format = vk::Format::eR8G8B8A8Unorm;
 
-        // 2. DEVICE LOCAL (GPU Friendly)
+        // 2. Use LINEAR Tiling for maximum compatibility
+        // While Optimal is faster, Linear RGBA8 is universally supported by every
+        // GStreamer version and driver.
+        image_info.tiling = vk::ImageTiling::eLinear;
+
+        // 3. Device Local (GPU VRAM)
+        // Since we are using DMABuf (GPU-to-GPU), we do NOT need Host Visible memory.
         alloc_info.flags |= VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
         alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     }
@@ -697,10 +718,12 @@ void RendererVulkan::ConfigureFramebufferTexture(TextureInfo& texture,
     };
     texture.image_view = device.createImageView(view_info);
 
-    texture.width = framebuffer.width;
-    texture.height = framebuffer.height;
+    // --- MODIFY: Save Scaled Dimensions to State ---
+    texture.width = scaled_width;
+    texture.height = scaled_height;
+    // ----------------------------------------------
     texture.format = framebuffer.color_format;
-}
+                                                 }
 
 void RendererVulkan::FillScreen(Common::Vec3<u8> color, const TextureInfo& texture) {
     const vk::ClearColorValue clear_color = {
@@ -1100,11 +1123,14 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
                     vk::SubresourceLayout layout;
                     d.getImageSubresourceLayout(target_screen.image, &subRes, &layout);
 
+
                     int stride = static_cast<int>(layout.rowPitch);
-                    int drm_format = 0x34324241; // ABGR8888
-                    if (target_screen.format == Pica::PixelFormat::RGB565) {
-                        drm_format = 0x36314752; // RGB565
-                    }
+
+                    // FORCE DRM FORMAT TO ABGR8888
+                    // We forced the VkImage to eR8G8B8A8Unorm (ABGR in DRM) above.
+                    // So we must report that format, regardless of what the Pica core thinks.
+                    int drm_format = 0x34324241; // DRM_FORMAT_ABGR8888
+
 
                     // 3. Send Metadata + Modifier
                     bool sent = DeckUpad::global_streamer.SendFrame(

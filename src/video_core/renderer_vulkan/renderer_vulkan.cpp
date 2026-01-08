@@ -92,6 +92,16 @@ namespace DeckUpad {
         int sock_fd = -1;
         bool connected = false;
 
+        // --- ADD THIS FUNCTION ---
+        void Disconnect() {
+            if (sock_fd >= 0) {
+                close(sock_fd);
+                sock_fd = -1;
+            }
+            connected = false;
+        }
+        // -------------------------
+
         void Connect() {
             if (connected) return;
 
@@ -159,12 +169,12 @@ namespace DeckUpad {
             cmsg->cmsg_len = CMSG_LEN(sizeof(int));
             *((int *)CMSG_DATA(cmsg)) = dma_fd;
 
-            if (sendmsg(sock_fd, &msg, 0) < 0) {
+            // --- CHANGE THIS BLOCK ---
+            // Added MSG_NOSIGNAL to prevent emulator crash on disconnect
+            if (sendmsg(sock_fd, &msg, MSG_NOSIGNAL) < 0) {
                 // If pipe broke or buffer full, reset and fail
                 if (errno == EPIPE || errno == ECONNRESET) {
-                    close(sock_fd);
-                    connected = false;
-                    sock_fd = -1;
+                    Disconnect(); // Use the helper
                 }
                 return false;
             }
@@ -252,6 +262,7 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
 
 
     // >>> INSERT THIS: Reset streaming state on startup <<<
+    DeckUpad::global_streamer.Disconnect();
     g_last_sent_image = nullptr;
     g_last_sent_width = 0;
     g_last_sent_height = 0;
@@ -268,6 +279,7 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
 }
 
 RendererVulkan::~RendererVulkan() {
+    DeckUpad::global_streamer.Disconnect();
     vk::Device device = instance.GetDevice();
     scheduler.Finish();
     main_present_window.WaitPresent();

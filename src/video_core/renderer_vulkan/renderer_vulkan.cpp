@@ -116,7 +116,7 @@ namespace DeckUpad {
             memset(&addr, 0, sizeof(addr));
             addr.sun_family = AF_UNIX;
 
-            const char* name = "/com/obsproject/vkcapture";
+            const char* name = "/com/DeckUpad/video";
             addr.sun_path[0] = '\0';
             strncpy(addr.sun_path + 1, name, sizeof(addr.sun_path) - 2);
             socklen_t addr_len = sizeof(sa_family_t) + 1 + strlen(name);

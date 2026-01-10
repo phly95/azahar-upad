@@ -77,14 +77,14 @@ namespace DeckUpad {
         uint8_t nfd = 1;   // Number of FDs
         int32_t width;
         int32_t height;
-        int32_t format;     // DRM format
-        int32_t strides[4]; // Stride for each plane
-        int32_t offsets[4]; // Offset for each plane
-        uint64_t modifier = 0; // DRM_FORMAT_MOD_LINEAR (0)
+        int32_t format;
+        int32_t strides[4];
+        int32_t offsets[4];
+        uint64_t modifier = 0;
         uint32_t winid = 0;
         uint8_t flip = 0;
         uint32_t color_space = 0;
-        uint8_t pad[65]; // Padding to align to 128 bytes
+        uint8_t pad[65];
     } __attribute__((packed));
 
     class Streamer {
@@ -92,7 +92,6 @@ namespace DeckUpad {
         int sock_fd = -1;
         bool connected = false;
 
-        // --- ADD THIS FUNCTION ---
         void Disconnect() {
             if (sock_fd >= 0) {
                 close(sock_fd);
@@ -100,7 +99,20 @@ namespace DeckUpad {
             }
             connected = false;
         }
-        // -------------------------
+
+        // NEW: Active Health Check
+        bool IsAlive() {
+            if (!connected) return false;
+            char buf;
+            // Peek at the socket non-blocking.
+            // If recv returns 0, peer closed. If error (not EAGAIN), connection dead.
+            ssize_t n = recv(sock_fd, &buf, 1, MSG_PEEK | MSG_DONTWAIT);
+            if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                Disconnect();
+                return false;
+            }
+            return true;
+        }
 
         void Connect() {
             if (connected) return;
@@ -108,23 +120,19 @@ namespace DeckUpad {
             sock_fd = socket(AF_UNIX, SOCK_STREAM, 0);
             if (sock_fd < 0) return;
 
-            // Set Non-Blocking
             int flags = fcntl(sock_fd, F_GETFL, 0);
             fcntl(sock_fd, F_SETFL, flags | O_NONBLOCK);
 
             struct sockaddr_un addr;
             memset(&addr, 0, sizeof(addr));
             addr.sun_family = AF_UNIX;
-
             const char* name = "/com/DeckUpad/video";
             addr.sun_path[0] = '\0';
             strncpy(addr.sun_path + 1, name, sizeof(addr.sun_path) - 2);
-            socklen_t addr_len = sizeof(sa_family_t) + 1 + strlen(name);
 
-            if (connect(sock_fd, (struct sockaddr*)&addr, addr_len) == 0) {
+            if (connect(sock_fd, (struct sockaddr*)&addr, sizeof(sa_family_t) + 1 + strlen(name)) == 0) {
                 connected = true;
             } else {
-                // Check if in progress (common for non-blocking)
                 if (errno == EINPROGRESS || errno == EALREADY || errno == EISCONN) {
                     connected = true;
                 } else {
@@ -134,11 +142,10 @@ namespace DeckUpad {
             }
         }
 
-        // Returns TRUE only if data was actually written to the socket
         bool SendFrame(int dma_fd, int width, int height, int stride, int format, uint64_t modifier) {
-            if (!connected) {
+            // Auto-reconnect if dead
+            if (!IsAlive()) {
                 Connect();
-                // If still not connected, fail
                 if (!connected) return false;
             }
 
@@ -154,7 +161,6 @@ namespace DeckUpad {
 
             struct msghdr msg = {0};
             struct iovec iov = {&pkt, sizeof(pkt)};
-
             char buf[CMSG_SPACE(sizeof(int))];
             memset(buf, 0, sizeof(buf));
 
@@ -169,12 +175,10 @@ namespace DeckUpad {
             cmsg->cmsg_len = CMSG_LEN(sizeof(int));
             *((int *)CMSG_DATA(cmsg)) = dma_fd;
 
-            // --- CHANGE THIS BLOCK ---
-            // Added MSG_NOSIGNAL to prevent emulator crash on disconnect
+            // Use MSG_NOSIGNAL to prevent emulator crash if python script dies
             if (sendmsg(sock_fd, &msg, MSG_NOSIGNAL) < 0) {
-                // If pipe broke or buffer full, reset and fail
                 if (errno == EPIPE || errno == ECONNRESET) {
-                    Disconnect(); // Use the helper
+                    Disconnect();
                 }
                 return false;
             }
@@ -1076,42 +1080,32 @@ void RendererVulkan::DrawBottomScreen(const Layout::FramebufferLayout& layout,
 }
 
 
-void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout,
-                                 bool flipped) {
+void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& layout, bool flipped) {
 
     // --- Deck-Upad Streaming Logic ---
     if (Settings::values.layout_option.GetValue() == Settings::LayoutOption::DeckUpadStreaming) {
 
+        // 1. STATE CHECK: If python script died, reset our generation count to force a resend
+        if (!DeckUpad::global_streamer.IsAlive()) {
+            g_last_sent_generation = 0;
+        }
+
         bool swapped = Settings::values.swap_screen.GetValue();
         int target_index = swapped ? 0 : 2;
-
         const auto& target_screen = screen_infos[target_index].texture;
 
         bool needs_update = false;
 
-        // CHECK GENERATION FIRST. This catches handle reuse.
-        if (target_screen.generation != g_last_sent_generation) {
-            LOG_INFO(Render_Vulkan, "DeckUpad: Texture Generation changed (Reallocation). Resending.");
-            needs_update = true;
-        }
-        else if (target_screen.image != g_last_sent_image) {
-            LOG_INFO(Render_Vulkan, "DeckUpad: Image Handle changed (Screen Swap). Resending.");
-            needs_update = true;
-        } else if (target_screen.width != g_last_sent_width || target_screen.height != g_last_sent_height) {
-            LOG_INFO(Render_Vulkan, "DeckUpad: Resolution changed. Resending.");
-            needs_update = true;
-        } else if (target_screen.modifier != g_last_sent_modifier) {
-            LOG_INFO(Render_Vulkan, "DeckUpad: Modifier changed. Resending.");
-            needs_update = true;
-        }
+        if (target_screen.generation != g_last_sent_generation) needs_update = true;
+        else if (target_screen.image != g_last_sent_image) needs_update = true;
+        else if (target_screen.width != g_last_sent_width) needs_update = true;
+        else if (target_screen.height != g_last_sent_height) needs_update = true;
+        else if (target_screen.modifier != g_last_sent_modifier) needs_update = true;
 
         if (needs_update) {
-            // 1. FORCE SUBMISSION
-            scheduler.Flush();
+            scheduler.Flush(); // Ensure GPU is done drawing
 
-            // 2. Export and Send FD
             vk::Device d = instance.GetDevice();
-
             VmaAllocationInfo alloc_info_vma;
             vmaGetAllocationInfo(instance.GetAllocator(), target_screen.allocation, &alloc_info_vma);
 
@@ -1124,52 +1118,33 @@ void RendererVulkan::DrawScreens(Frame* frame, const Layout::FramebufferLayout& 
             if (func) {
                 int fd = -1;
                 VkMemoryGetFdInfoKHR c_fd_info = static_cast<VkMemoryGetFdInfoKHR>(fd_info);
-                VkResult res = func(d, &c_fd_info, &fd);
+                if (func(d, &c_fd_info, &fd) == VK_SUCCESS) {
 
-                if (res == VK_SUCCESS) {
-                    vk::ImageSubresource subRes;
-                    subRes.aspectMask = vk::ImageAspectFlagBits::eColor;
-                    subRes.mipLevel = 0;
-                    subRes.arrayLayer = 0;
-
+                    vk::ImageSubresource subRes{vk::ImageAspectFlagBits::eColor, 0, 0};
                     vk::SubresourceLayout layout;
                     d.getImageSubresourceLayout(target_screen.image, &subRes, &layout);
 
-
-                    int stride = static_cast<int>(layout.rowPitch);
-
-                    // FORCE DRM FORMAT TO ABGR8888
-                    // We forced the VkImage to eR8G8B8A8Unorm (ABGR in DRM) above.
-                    // So we must report that format, regardless of what the Pica core thinks.
-                    int drm_format = 0x34324241; // DRM_FORMAT_ABGR8888
-
-
-                    // 3. Send Metadata + Modifier
+                    // Try to send
                     bool sent = DeckUpad::global_streamer.SendFrame(
                         fd,
                         target_screen.width,
                         target_screen.height,
-                        stride,
-                        drm_format,
-                        target_screen.modifier
+                        static_cast<int>(layout.rowPitch),
+                                                                    0x34324241, // ABGR8888
+                                                                    target_screen.modifier
                     );
 
-                    // Important: Close the FD here
-                    close(fd);
+                    close(fd); // Always close FD
 
+                    // Only update state if send SUCCEEDED
                     if (sent) {
                         g_last_sent_image = target_screen.image;
                         g_last_sent_width = target_screen.width;
                         g_last_sent_height = target_screen.height;
                         g_last_sent_modifier = target_screen.modifier;
-                        g_last_sent_generation = target_screen.generation; // <--- UPDATE GENERATION
-                        LOG_INFO(Render_Vulkan, "DeckUpad: Frame sent successfully.");
+                        g_last_sent_generation = target_screen.generation;
                     }
-                } else {
-                    LOG_ERROR(Render_Vulkan, "DeckUpad: vkGetMemoryFdKHR failed with code {}", (int)res);
                 }
-            } else {
-                LOG_ERROR(Render_Vulkan, "DeckUpad: Could not load vkGetMemoryFdKHR pointer");
             }
         }
     }

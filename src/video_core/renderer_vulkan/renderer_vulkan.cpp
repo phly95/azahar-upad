@@ -1150,6 +1150,7 @@ void RendererVulkan::UpdateStreaming() {
 
     if (!enabled) {
         if (frame_streamer) {
+            scheduler.Finish();
             frame_streamer->Stop();
             rasterizer.SetFrameStreamer(nullptr);
             frame_streamer.reset();
@@ -1162,6 +1163,7 @@ void RendererVulkan::UpdateStreaming() {
     // Enable or recreate if needed
     if (needs_recreate) {
         if (frame_streamer) {
+            scheduler.Finish();
             frame_streamer->Stop();
             rasterizer.SetFrameStreamer(nullptr);
             frame_streamer.reset();

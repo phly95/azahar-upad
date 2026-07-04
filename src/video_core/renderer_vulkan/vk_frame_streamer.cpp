@@ -61,7 +61,6 @@ void FrameStreamer::Start(const std::string& target_ip, u16 target_port) {
     if (active) {
         Stop();
     }
-    frame_count = 0;
     InitGstPipeline(target_ip, target_port);
     active = (pipeline != nullptr);
     if (active) {
@@ -334,10 +333,9 @@ void FrameStreamer::PushFrame() {
     gst_buffer_add_video_meta_full(buf, GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_RGBA,
                                    width, height, 1, offsets, strides);
 
-    GST_BUFFER_PTS(buf) = gst_util_uint64_scale(frame_count, GST_SECOND, 30);
+    GST_BUFFER_PTS(buf) = gst_element_get_current_running_time(pipeline);
     GST_BUFFER_DTS(buf) = GST_BUFFER_PTS(buf);
-    GST_BUFFER_DURATION(buf) = gst_util_uint64_scale_int(1, GST_SECOND, 30);
-    frame_count++;
+    GST_BUFFER_DURATION(buf) = GST_CLOCK_TIME_NONE;
 
     GstFlowReturn ret;
     g_signal_emit_by_name(appsrc, "push-buffer", buf, &ret);
@@ -392,8 +390,6 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
 
     GstVideoInfo vinfo;
     gst_video_info_set_format(&vinfo, GST_VIDEO_FORMAT_RGBA, width, height);
-    vinfo.fps_n = 30;
-    vinfo.fps_d = 1;
     GstCaps* caps = gst_video_info_to_caps(&vinfo);
     gst_caps_set_features(caps, 0, gst_caps_features_new("memory:DMABuf", NULL));
     g_object_set(appsrc, "caps", caps, NULL);
@@ -432,7 +428,6 @@ void FrameStreamer::CleanupGstPipeline() {
         gst_object_unref(allocator);
         allocator = nullptr;
     }
-    frame_count = 0;
 }
 
 #else

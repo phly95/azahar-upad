@@ -70,11 +70,10 @@ private:
     u32 height = 0;
     bool active = false;
 
-    static constexpr size_t NUM_FRAMES = 2;
+    static constexpr size_t NUM_FRAMES = 3;
     std::array<FrameResources, NUM_FRAMES> frames{};
     u32 write_index = 0;
     u64 drm_modifier = 0;
-    guint64 frame_count = 0;
 
 #ifdef HAVE_GSTREAMER
     GstElement* pipeline = nullptr;

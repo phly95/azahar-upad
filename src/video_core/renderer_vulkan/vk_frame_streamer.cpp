@@ -11,6 +11,7 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 
 #ifdef HAVE_GSTREAMER
+#include <gst/allocators/gstfdmemory.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/video/video.h>
 #endif
@@ -69,30 +70,31 @@ void FrameStreamer::CreateStreamingTexture() {
     vk::ExternalMemoryImageCreateInfo external_info{};
     external_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
 
-    const vk::ImageCreateInfo image_info = {
-        .pNext = &external_info,
-        .imageType = vk::ImageType::e2D,
-        .format = vk::Format::eR8G8B8A8Unorm,
-        .extent = {width, height, 1},
-        .mipLevels = 1,
-        .arrayLayers = 1,
-        .samples = vk::SampleCountFlagBits::e1,
-        .tiling = vk::ImageTiling::eLinear,
-        .usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-        .sharingMode = vk::SharingMode::eExclusive,
-        .initialLayout = vk::ImageLayout::eUndefined,
-    };
+    vk::ImageCreateInfo image_info{};
+    image_info.pNext = &external_info;
+    image_info.imageType = vk::ImageType::e2D;
+    image_info.format = vk::Format::eR8G8B8A8Unorm;
+    image_info.extent = vk::Extent3D{width, height, 1};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = vk::SampleCountFlagBits::e1;
+    image_info.tiling = vk::ImageTiling::eLinear;
+    image_info.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled;
+    image_info.sharingMode = vk::SharingMode::eExclusive;
+    image_info.initialLayout = vk::ImageLayout::eUndefined;
 
     streaming_image = device.createImage(image_info);
 
     vk::MemoryRequirements mem_reqs = device.getImageMemoryRequirements(streaming_image);
-    vk::PhysicalDeviceMemoryProperties mem_props = instance.GetPhysicalDevice().getMemoryProperties();
+    vk::PhysicalDeviceMemoryProperties mem_props =
+        instance.GetPhysicalDevice().getMemoryProperties();
 
     u32 memory_type_index = 0;
     bool found = false;
     for (u32 i = 0; i < mem_props.memoryTypeCount; ++i) {
         if ((mem_reqs.memoryTypeBits & (1 << i)) &&
-            (mem_props.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)) {
+            (mem_props.memoryTypes[i].propertyFlags &
+             vk::MemoryPropertyFlagBits::eDeviceLocal)) {
             memory_type_index = i;
             found = true;
             break;
@@ -106,11 +108,10 @@ void FrameStreamer::CreateStreamingTexture() {
     vk::ExportMemoryAllocateInfo export_alloc_info{};
     export_alloc_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
 
-    vk::MemoryAllocateInfo alloc_info = {
-        .pNext = &export_alloc_info,
-        .allocationSize = mem_reqs.size,
-        .memoryTypeIndex = memory_type_index,
-    };
+    vk::MemoryAllocateInfo alloc_info{};
+    alloc_info.pNext = &export_alloc_info;
+    alloc_info.allocationSize = mem_reqs.size;
+    alloc_info.memoryTypeIndex = memory_type_index;
 
     streaming_memory = device.allocateMemory(alloc_info);
     device.bindImageMemory(streaming_image, streaming_memory, 0);
@@ -126,28 +127,28 @@ void FrameStreamer::CreateStreamingTexture() {
     }
 
     // Query the stride for DMA-BUF layout
-    vk::ImageSubresource subres{vk::ImageAspectFlagBits::eColor, 0, 0};
+    vk::ImageSubresource subres{};
+    subres.aspectMask = vk::ImageAspectFlagBits::eColor;
+    subres.mipLevel = 0;
+    subres.arrayLayer = 0;
     vk::SubresourceLayout layout;
     device.getImageSubresourceLayout(streaming_image, &subres, &layout);
     stride = static_cast<u32>(layout.rowPitch);
 
     // Create image view
-    const vk::ImageViewCreateInfo view_info = {
-        .image = streaming_image,
-        .viewType = vk::ImageViewType::e2D,
-        .format = vk::Format::eR8G8B8A8Unorm,
-        .subresourceRange{
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
+    vk::ImageViewCreateInfo view_info{};
+    view_info.image = streaming_image;
+    view_info.viewType = vk::ImageViewType::e2D;
+    view_info.format = vk::Format::eR8G8B8A8Unorm;
+    view_info.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    view_info.subresourceRange.baseMipLevel = 0;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.baseArrayLayer = 0;
+    view_info.subresourceRange.layerCount = 1;
     streaming_image_view = device.createImageView(view_info);
 
-    LOG_INFO(Render_Vulkan, "FrameStreamer: Streaming texture created ({}x{}, modifier=0x{:x}, "
-                            "stride={})",
+    LOG_INFO(Render_Vulkan,
+             "FrameStreamer: Streaming texture created ({}x{}, modifier=0x{:x}, stride={})",
              width, height, drm_modifier, stride);
 }
 
@@ -203,100 +204,78 @@ int FrameStreamer::ExportDmaBuf() {
     return dup(cached_fd);
 }
 
-bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source,
-                               u32 src_width, u32 src_height) {
+bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 src_width,
+                               u32 src_height) {
     if (!streaming_image) {
         return false;
     }
 
-    // Transition source to transfer src optimal
-    const vk::ImageMemoryBarrier src_barrier = {
-        .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead,
-        .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = source,
-        .subresourceRange{
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
+    auto MakeBarrier = [](vk::Image img, vk::ImageLayout old_layout,
+                          vk::ImageLayout new_layout, vk::AccessFlags src_access,
+                          vk::AccessFlags dst_access) {
+        vk::ImageMemoryBarrier barrier{};
+        barrier.srcAccessMask = src_access;
+        barrier.dstAccessMask = dst_access;
+        barrier.oldLayout = old_layout;
+        barrier.newLayout = new_layout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = img;
+        barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        return barrier;
     };
+
+    // Transition source to transfer src optimal
+    auto src_barrier = MakeBarrier(
+        source, vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal,
+        vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead,
+        vk::AccessFlagBits::eTransferRead);
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput |
                                vk::PipelineStageFlagBits::eFragmentShader,
                            vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion,
                            {}, {}, src_barrier);
 
     // Transition streaming texture to transfer dst
-    const vk::ImageMemoryBarrier dst_barrier = {
-        .srcAccessMask = vk::AccessFlagBits::eNone,
-        .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
-        .oldLayout = vk::ImageLayout::eUndefined,
-        .newLayout = vk::ImageLayout::eTransferDstOptimal,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = streaming_image,
-        .subresourceRange{
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
+    auto dst_barrier = MakeBarrier(streaming_image, vk::ImageLayout::eUndefined,
+                                   vk::ImageLayout::eTransferDstOptimal,
+                                   vk::AccessFlagBits::eNone, vk::AccessFlagBits::eTransferWrite);
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
                            vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion,
                            {}, {}, dst_barrier);
 
     // Blit from source to streaming texture (handles format conversion on GPU)
-    const vk::ImageBlit blit = {
-        .srcSubresource{vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-        .srcOffsets = {{{0, 0, 0}, {static_cast<i32>(src_width), static_cast<i32>(src_height), 1}}},
-        .dstSubresource{vk::ImageAspectFlagBits::eColor, 0, 0, 1},
-        .dstOffsets = {{{0, 0, 0}, {static_cast<i32>(width), static_cast<i32>(height), 1}}},
-    };
+    vk::ImageBlit blit{};
+    blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    blit.srcSubresource.mipLevel = 0;
+    blit.srcSubresource.baseArrayLayer = 0;
+    blit.srcSubresource.layerCount = 1;
+    blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
+    blit.srcOffsets[1] = vk::Offset3D{static_cast<s32>(src_width), static_cast<s32>(src_height), 1};
+    blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    blit.dstSubresource.mipLevel = 0;
+    blit.dstSubresource.baseArrayLayer = 0;
+    blit.dstSubresource.layerCount = 1;
+    blit.dstOffsets[0] = vk::Offset3D{0, 0, 0};
+    blit.dstOffsets[1] = vk::Offset3D{static_cast<s32>(width), static_cast<s32>(height), 1};
     cmdbuf.blitImage(source, vk::ImageLayout::eTransferSrcOptimal, streaming_image,
                      vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
 
     // Restore source image to general
-    const vk::ImageMemoryBarrier src_restore = {
-        .srcAccessMask = vk::AccessFlagBits::eTransferRead,
-        .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead,
-        .oldLayout = vk::ImageLayout::eTransferSrcOptimal,
-        .newLayout = vk::ImageLayout::eGeneral,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = source,
-        .subresourceRange{
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
+    auto src_restore = MakeBarrier(
+        source, vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eGeneral,
+        vk::AccessFlagBits::eTransferRead,
+        vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead);
 
     // Transition streaming texture to general (needed for DMA-BUF export)
-    const vk::ImageMemoryBarrier final_barrier = {
-        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-        .dstAccessMask = vk::AccessFlagBits::eMemoryRead,
-        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-        .newLayout = vk::ImageLayout::eGeneral,
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = streaming_image,
-        .subresourceRange{
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .baseMipLevel = 0,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-        },
-    };
+    auto final_barrier = MakeBarrier(streaming_image, vk::ImageLayout::eTransferDstOptimal,
+                                     vk::ImageLayout::eGeneral,
+                                     vk::AccessFlagBits::eTransferWrite,
+                                     vk::AccessFlagBits::eMemoryRead);
+
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                            vk::PipelineStageFlagBits::eAllCommands,
                            vk::DependencyFlagBits::eByRegion, {}, {},
@@ -317,15 +296,15 @@ void FrameStreamer::PushFrame() {
     }
 
     // Create GstBuffer wrapping the DMA-BUF fd
-    GstMemory* mem = gst_fd_allocator_alloc(allocator, fd, stride * height,
-                                            GST_FD_MEMORY_FLAG_NONE);
+    GstMemory* mem =
+        gst_fd_allocator_alloc(allocator, fd, stride * height, GST_FD_MEMORY_FLAG_NONE);
     GstBuffer* buf = gst_buffer_new();
     gst_buffer_append_memory(buf, mem);
 
     static guint64 frame_count = 0;
     GST_BUFFER_PTS(buf) = gst_util_uint64_scale(frame_count, GST_SECOND, 30);
     GST_BUFFER_DTS(buf) = GST_BUFFER_PTS(buf);
-    GST_BUFFER_DURATION(buf) = gst_util_uint64_scale_int(1, GST_SECOND, 30); // 30fps
+    GST_BUFFER_DURATION(buf) = gst_util_uint64_scale_int(1, GST_SECOND, 30);
     frame_count++;
 
     GstFlowReturn ret;
@@ -340,14 +319,11 @@ void FrameStreamer::PushFrame() {
 
 #ifdef HAVE_GSTREAMER
 
-
-
 void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_port) {
     if (!gst_is_initialized()) {
         gst_init(nullptr, nullptr);
     }
 
-    // Build pipeline: appsrc → videoconvert → encoder → h264parse → rtp → udpsink
     // Try VA-API hardware encoder first, fall back to software x264enc
     std::string enc_desc;
     GstElement* test_encoder = gst_element_factory_make("vaapih264enc", nullptr);
@@ -383,7 +359,7 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
         return;
     }
 
-    // Configure appsrc caps
+    // Configure appsrc caps with framerate
     GstVideoInfo vinfo;
     gst_video_info_set_format(&vinfo, GST_VIDEO_FORMAT_RGBA, width, height);
     vinfo.fps_n = 30;

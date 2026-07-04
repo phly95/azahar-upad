@@ -6,9 +6,8 @@
 
 #include <array>
 #include <string>
-#include <vulkan/vulkan.hpp>
-
 #include "common/common_types.h"
+#include "video_core/renderer_vulkan/vk_common.h"
 
 #ifdef HAVE_GSTREAMER
 #include <gst/gst.h>

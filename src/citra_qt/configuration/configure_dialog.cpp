@@ -15,6 +15,7 @@
 #include "citra_qt/configuration/configure_input.h"
 #include "citra_qt/configuration/configure_layout.h"
 #include "citra_qt/configuration/configure_storage.h"
+#include "citra_qt/configuration/configure_streaming.h"
 #include "citra_qt/configuration/configure_system.h"
 #include "citra_qt/configuration/configure_ui.h"
 #include "citra_qt/configuration/configure_web.h"
@@ -40,7 +41,9 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_, Cor
       camera_tab{std::make_unique<ConfigureCamera>(this)},
       debug_tab{std::make_unique<ConfigureDebug>(is_powered_on, this)},
       storage_tab{std::make_unique<ConfigureStorage>(is_powered_on, this)},
-      web_tab{std::make_unique<ConfigureWeb>(this)}, ui_tab{std::make_unique<ConfigureUi>(this)} {
+      web_tab{std::make_unique<ConfigureWeb>(this)},
+      ui_tab{std::make_unique<ConfigureUi>(this)},
+      streaming_tab{std::make_unique<ConfigureStreaming>(this)} {
     Settings::SetConfiguringGlobal(true);
 
     ui->setupUi(this);
@@ -58,6 +61,7 @@ ConfigureDialog::ConfigureDialog(QWidget* parent, HotkeyRegistry& registry_, Cor
     ui->tabWidget->addTab(storage_tab.get(), tr("Storage"));
     ui->tabWidget->addTab(web_tab.get(), tr("Web"));
     ui->tabWidget->addTab(ui_tab.get(), tr("UI"));
+    ui->tabWidget->addTab(streaming_tab.get(), tr("Streaming"));
 
     hotkeys_tab->Populate(registry);
 
@@ -96,6 +100,7 @@ void ConfigureDialog::SetConfiguration() {
     web_tab->SetConfiguration();
     ui_tab->SetConfiguration();
     storage_tab->SetConfiguration();
+    streaming_tab->SetConfiguration();
 }
 
 void ConfigureDialog::ApplyConfiguration() {
@@ -113,6 +118,7 @@ void ConfigureDialog::ApplyConfiguration() {
     web_tab->ApplyConfiguration();
     ui_tab->ApplyConfiguration();
     storage_tab->ApplyConfiguration();
+    streaming_tab->ApplyConfiguration();
     system.ApplySettings();
     Settings::LogSettings();
 }
@@ -127,6 +133,7 @@ void ConfigureDialog::PopulateSelectionList() {
          {tr("System"), {system_tab.get(), camera_tab.get(), storage_tab.get()}},
          {tr("Graphics"), {enhancements_tab.get(), layout_tab.get(), graphics_tab.get()}},
          {tr("Audio"), {audio_tab.get()}},
+         {tr("Network"), {streaming_tab.get()}},
          {tr("Controls"), {input_tab.get(), hotkeys_tab.get()}}}};
 
     for (const auto& entry : items) {
@@ -167,6 +174,7 @@ void ConfigureDialog::RetranslateUI() {
     web_tab->RetranslateUI();
     ui_tab->RetranslateUI();
     storage_tab->RetranslateUI();
+    streaming_tab->RetranslateUI();
 }
 
 void ConfigureDialog::UpdateVisibleTabs() {
@@ -186,7 +194,8 @@ void ConfigureDialog::UpdateVisibleTabs() {
                                                  {debug_tab.get(), tr("Debug")},
                                                  {storage_tab.get(), tr("Storage")},
                                                  {web_tab.get(), tr("Web")},
-                                                 {ui_tab.get(), tr("UI")}};
+                                                 {ui_tab.get(), tr("UI")},
+                                                 {streaming_tab.get(), tr("Network")}};
 
     ui->tabWidget->clear();
 

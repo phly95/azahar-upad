@@ -275,6 +275,7 @@ void QtConfig::ReadValues() {
         ReadDebuggingValues();
         ReadWebServiceValues();
         ReadVideoDumpingValues();
+        ReadStreamingValues();
     }
 
     ReadUIValues();
@@ -827,6 +828,23 @@ void QtConfig::ReadVideoDumpingValues() {
     qt_config->endGroup();
 }
 
+void QtConfig::ReadStreamingValues() {
+    qt_config->beginGroup(QStringLiteral("Streaming"));
+
+    ReadBasicSetting(Settings::values.streaming_enabled);
+    Settings::values.streaming_target_ip =
+        ReadSetting(Settings::QKeys::streaming_target_ip,
+                     QString::fromStdString(Settings::values.streaming_target_ip.GetValue()))
+            .toString()
+            .toStdString();
+    Settings::values.streaming_target_port = static_cast<u16>(
+        ReadSetting(Settings::QKeys::streaming_target_port,
+                     Settings::values.streaming_target_port.GetValue())
+            .toInt());
+
+    qt_config->endGroup();
+}
+
 void QtConfig::ReadUIValues() {
     qt_config->beginGroup(QStringLiteral("UI"));
 
@@ -931,6 +949,7 @@ void QtConfig::SaveValues() {
         SaveDebuggingValues();
         SaveWebServiceValues();
         SaveVideoDumpingValues();
+        SaveStreamingValues();
     }
 
     SaveUIValues();
@@ -1359,6 +1378,20 @@ void QtConfig::SaveVideoDumpingValues() {
                  DEFAULT_AUDIO_ENCODER_OPTIONS);
     WriteSetting(Settings::QKeys::audio_bitrate,
                  static_cast<unsigned long long>(Settings::values.audio_bitrate), 64000);
+
+    qt_config->endGroup();
+}
+
+void QtConfig::SaveStreamingValues() {
+    qt_config->beginGroup(QStringLiteral("Streaming"));
+
+    WriteBasicSetting(Settings::values.streaming_enabled);
+    WriteSetting(Settings::QKeys::streaming_target_ip,
+                 QString::fromStdString(Settings::values.streaming_target_ip.GetValue()),
+                 QString::fromStdString(Settings::values.streaming_target_ip.GetDefault()));
+    WriteSetting(Settings::QKeys::streaming_target_port,
+                 static_cast<int>(Settings::values.streaming_target_port.GetValue()),
+                 Settings::values.streaming_target_port.GetDefault());
 
     qt_config->endGroup();
 }

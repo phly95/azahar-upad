@@ -134,21 +134,6 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
         secondary_present_window_ptr = std::make_unique<PresentWindow>(
             *secondary_window, instance, scheduler, IsLowRefreshRate());
     }
-
-#ifdef HAVE_GSTREAMER
-    if (Settings::values.streaming_enabled.GetValue()) {
-        // Create streaming texture sized for top screen at current resolution factor
-        u32 scale = Settings::values.resolution_factor.GetValue();
-        if (scale == 0) scale = 1;
-        const u32 stream_w = Core::kScreenTopWidth * scale;
-        const u32 stream_h = Core::kScreenTopHeight * scale;
-        frame_streamer = std::make_unique<FrameStreamer>(instance, stream_w, stream_h);
-        rasterizer.SetFrameStreamer(frame_streamer.get());
-        frame_streamer->Start(
-            Settings::values.streaming_target_ip.GetValue(),
-            static_cast<u16>(Settings::values.streaming_target_port.GetValue()));
-    }
-#endif
 }
 
 RendererVulkan::~RendererVulkan() {
@@ -1136,6 +1121,48 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
     });
 }
 
+void RendererVulkan::UpdateStreaming() {
+#ifdef HAVE_GSTREAMER
+    const bool enabled = Settings::values.streaming_enabled.GetValue();
+    u32 scale = Settings::values.resolution_factor.GetValue();
+    if (scale == 0) scale = 1;
+    const u32 target_w = Core::kScreenTopWidth * scale;
+    const u32 target_h = Core::kScreenTopHeight * scale;
+
+    // Detect if settings changed and streaming texture needs recreation
+    const bool size_changed = frame_streamer &&
+        (frame_streamer->GetWidth() != target_w || frame_streamer->GetHeight() != target_h);
+
+    if (!enabled) {
+        if (frame_streamer) {
+            frame_streamer->Stop();
+            rasterizer.SetFrameStreamer(nullptr);
+            frame_streamer.reset();
+            prev_streaming_enabled = false;
+            LOG_INFO(Render_Vulkan, "Streaming disabled.");
+        }
+        return;
+    }
+
+    // Enable or recreate if needed
+    if (!frame_streamer || size_changed || prev_streaming_enabled != enabled) {
+        if (frame_streamer) {
+            frame_streamer->Stop();
+            rasterizer.SetFrameStreamer(nullptr);
+            frame_streamer.reset();
+        }
+        frame_streamer = std::make_unique<FrameStreamer>(instance, target_w, target_h);
+        rasterizer.SetFrameStreamer(frame_streamer.get());
+        frame_streamer->Start(
+            Settings::values.streaming_target_ip.GetValue(),
+            static_cast<u16>(Settings::values.streaming_target_port.GetValue()));
+        prev_streaming_enabled = enabled;
+        prev_streaming_width = target_w;
+        prev_streaming_height = target_h;
+    }
+#endif
+}
+
 void RendererVulkan::SwapBuffers() {
     system.perf_stats->StartSwap();
     screenRendered = false;
@@ -1158,6 +1185,7 @@ void RendererVulkan::SwapBuffers() {
 
     const Layout::FramebufferLayout& layout = render_window.GetFramebufferLayout();
     PrepareRendertarget();
+    UpdateStreaming();
     RenderScreenshot();
     isSecondaryWindow = false;
     RenderToWindow(main_present_window, layout, false);

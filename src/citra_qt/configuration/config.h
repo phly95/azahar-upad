@@ -51,6 +51,7 @@ private:
     void ReadUtilityValues();
     void ReadWebServiceValues();
     void ReadVideoDumpingValues();
+    void ReadStreamingValues();
 
     void SaveValues();
     void SaveAudioValues();
@@ -72,6 +73,7 @@ private:
     void SaveUtilityValues();
     void SaveWebServiceValues();
     void SaveVideoDumpingValues();
+    void SaveStreamingValues();
 
     /**
      * Reads a setting from the qt_config.

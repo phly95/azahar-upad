@@ -121,6 +121,7 @@ private:
     void LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuffer, ScreenInfo& screen_info,
                             bool right_eye, u32 screen_index);
     void FillScreen(Common::Vec3<u8> color, const TextureInfo& texture);
+    void UpdateStreaming();
 
 private:
     Memory::MemorySystem& memory;
@@ -159,6 +160,9 @@ private:
     bool screenRendered;
 #ifdef HAVE_GSTREAMER
     std::unique_ptr<FrameStreamer> frame_streamer;
+    bool prev_streaming_enabled = false;
+    u32 prev_streaming_width = 0;
+    u32 prev_streaming_height = 0;
 #endif
 };
 

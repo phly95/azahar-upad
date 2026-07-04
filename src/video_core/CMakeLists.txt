@@ -203,6 +203,21 @@ if (ENABLE_VULKAN)
         shader/generator/spv_fs_shader_gen.h
     )
     target_link_libraries(video_core PRIVATE vulkan-headers vma sirit SPIRV glslang)
+
+    if (ENABLE_GSTREAMER)
+        find_package(PkgConfig)
+        if (PkgConfig_FOUND)
+            pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
+            target_sources(video_core PRIVATE
+                renderer_vulkan/vk_frame_streamer.cpp
+                renderer_vulkan/vk_frame_streamer.h
+            )
+            target_link_libraries(video_core PRIVATE PkgConfig::GST)
+            target_compile_definitions(video_core PRIVATE HAVE_GSTREAMER)
+        else()
+            message(WARNING "GStreamer support requires PkgConfig. Disabling GStreamer.")
+        endif()
+    endif()
 endif()
 
 if(ENABLE_SDL2)

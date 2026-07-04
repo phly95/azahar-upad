@@ -615,6 +615,10 @@ struct Values {
     SwitchableSetting<MonoRenderOption> mono_render_option{MonoRenderOption::LeftEye,
                                                            Keys::mono_render_option};
 
+    Setting<bool> streaming_enabled{false, Keys::streaming_enabled};
+    Setting<std::string> streaming_target_ip{std::string("192.168.50.10"), Keys::streaming_target_ip};
+    Setting<u16, true> streaming_target_port{5000, 1, 65535, Keys::streaming_target_port};
+
     Setting<u32> cardboard_screen_size{85, Keys::cardboard_screen_size};
     Setting<s32> cardboard_x_shift{0, Keys::cardboard_x_shift};
     Setting<s32> cardboard_y_shift{0, Keys::cardboard_y_shift};

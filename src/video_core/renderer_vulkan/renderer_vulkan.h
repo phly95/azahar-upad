@@ -17,6 +17,10 @@
 #include "video_core/renderer_vulkan/vk_render_manager.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
+#ifdef HAVE_GSTREAMER
+#include "video_core/renderer_vulkan/vk_frame_streamer.h"
+#endif
+
 namespace Core {
 class System;
 }
@@ -115,7 +119,7 @@ private:
     void DrawCursor(const Layout::FramebufferLayout& layout);
 
     void LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuffer, ScreenInfo& screen_info,
-                            bool right_eye);
+                            bool right_eye, u32 screen_index);
     void FillScreen(Common::Vec3<u8> color, const TextureInfo& texture);
 
 private:
@@ -153,6 +157,9 @@ private:
     bool isSecondaryWindow;
     bool secondaryWindowEnabled;
     bool screenRendered;
+#ifdef HAVE_GSTREAMER
+    std::unique_ptr<FrameStreamer> frame_streamer;
+#endif
 };
 
 } // namespace Vulkan

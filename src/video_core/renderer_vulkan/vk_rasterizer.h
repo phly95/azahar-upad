@@ -45,6 +45,10 @@ public:
     ~RasterizerVulkan() override;
 
     void TickFrame();
+
+    void SetFrameStreamer(class FrameStreamer* streamer) {
+        frame_streamer = streamer;
+    }
     void LoadDefaultDiskResources(const std::atomic_bool& stop_loading,
                                   const VideoCore::DiskResourceLoadCallback& callback) override;
 
@@ -58,7 +62,7 @@ public:
     bool AccelerateTextureCopy(const Pica::DisplayTransferConfig& config) override;
     bool AccelerateFill(const Pica::MemoryFillConfig& config) override;
     bool AccelerateDisplay(const Pica::FramebufferConfig& config, PAddr framebuffer_addr,
-                           u32 pixel_stride, ScreenInfo& screen_info);
+                           u32 pixel_stride, ScreenInfo& screen_info, u32 screen_index);
     bool AccelerateDrawBatch(bool is_indexed) override;
 
     /// Switches the disk resources to the specified title
@@ -141,6 +145,7 @@ private:
     u32 uniform_size_aligned_vs;
     u32 uniform_size_aligned_fs;
     bool async_shaders{false};
+    class FrameStreamer* frame_streamer = nullptr;
 };
 
 } // namespace Vulkan

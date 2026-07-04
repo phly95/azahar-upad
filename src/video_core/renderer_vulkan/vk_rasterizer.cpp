@@ -18,6 +18,10 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture/texture_decode.h"
 
+#ifdef HAVE_GSTREAMER
+#include "video_core/renderer_vulkan/vk_frame_streamer.h"
+#endif
+
 namespace Vulkan {
 
 namespace {
@@ -765,7 +769,7 @@ bool RasterizerVulkan::AccelerateFill(const Pica::MemoryFillConfig& config) {
 
 bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
                                          PAddr framebuffer_addr, u32 pixel_stride,
-                                         ScreenInfo& screen_info) {
+                                         ScreenInfo& screen_info, u32 screen_index) {
     if (framebuffer_addr == 0) [[unlikely]] {
         return false;
     }
@@ -795,6 +799,21 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
         (float)src_rect.top / (float)scaled_height, (float)src_rect.right / (float)scaled_width);
 
     screen_info.image_view = src_surface.ImageView();
+
+    // Record a blit to the streaming texture if streaming is active for this screen
+#ifdef HAVE_GSTREAMER
+    if (frame_streamer && frame_streamer->IsActive()) {
+        const bool swapped = Settings::values.swap_screen.GetValue();
+        const u32 target_index = swapped ? 0 : 2;
+        if (screen_index == target_index) {
+            scheduler.Record([this, src_image = src_surface.Image(),
+                              src_w = src_surface.GetScaledWidth(),
+                              src_h = src_surface.GetScaledHeight()](vk::CommandBuffer cmdbuf) {
+                frame_streamer->RecordBlit(cmdbuf, src_image, src_w, src_h);
+            });
+        }
+    }
+#endif
 
     return true;
 }

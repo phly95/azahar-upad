@@ -7,6 +7,7 @@
 #include "common/memory_detect.h"
 #include "common/microprofile.h"
 #include "common/settings.h"
+#include "core/3ds.h"
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
 #include "video_core/gpu.h"
@@ -133,6 +134,21 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
         secondary_present_window_ptr = std::make_unique<PresentWindow>(
             *secondary_window, instance, scheduler, IsLowRefreshRate());
     }
+
+#ifdef HAVE_GSTREAMER
+    if (Settings::values.streaming_enabled.GetValue()) {
+        // Create streaming texture sized for top screen at current resolution factor
+        u32 scale = Settings::values.resolution_factor.GetValue();
+        if (scale == 0) scale = 1;
+        const u32 stream_w = Core::kScreenTopWidth * scale;
+        const u32 stream_h = Core::kScreenTopHeight * scale;
+        frame_streamer = std::make_unique<FrameStreamer>(instance, stream_w, stream_h);
+        rasterizer.SetFrameStreamer(frame_streamer.get());
+        frame_streamer->Start(
+            Settings::values.streaming_target_ip.GetValue(),
+            static_cast<u16>(Settings::values.streaming_target_port.GetValue()));
+    }
+#endif
 }
 
 RendererVulkan::~RendererVulkan() {
@@ -181,7 +197,7 @@ void RendererVulkan::PrepareRendertarget() {
             ConfigureFramebufferTexture(texture, framebuffer);
         }
 
-        LoadFBToScreenInfo(framebuffer, screen_infos[i], i == 1);
+        LoadFBToScreenInfo(framebuffer, screen_infos[i], i == 1, i);
     }
 }
 
@@ -262,7 +278,8 @@ void RendererVulkan::RenderToWindow(PresentWindow& window, const Layout::Framebu
 }
 
 void RendererVulkan::LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuffer,
-                                        ScreenInfo& screen_info, bool right_eye) {
+                                        ScreenInfo& screen_info, bool right_eye,
+                                        u32 screen_index) {
 
     if (framebuffer.address_right1 == 0 || framebuffer.address_right2 == 0) {
         right_eye = false;
@@ -284,7 +301,7 @@ void RendererVulkan::LoadFBToScreenInfo(const Pica::FramebufferConfig& framebuff
     ASSERT(pixel_stride % 4 == 0);
 
     if (!rasterizer.AccelerateDisplay(framebuffer, framebuffer_addr, static_cast<u32>(pixel_stride),
-                                      screen_info)) {
+                                       screen_info, screen_index)) {
         // Reset the screen info's display texture to its own permanent texture
         screen_info.image_view = screen_info.texture.image_view;
         screen_info.texcoords = {0.f, 0.f, 1.f, 1.f};
@@ -1173,6 +1190,14 @@ void RendererVulkan::SwapBuffers() {
     if (!screenRendered) {
         scheduler.Finish();
     }
+
+#ifdef HAVE_GSTREAMER
+    if (frame_streamer && frame_streamer->IsActive()) {
+        // GPU work is complete (either from Flush in RenderToWindow or Finish above).
+        // Export the DMA-BUF and push to the encoder.
+        frame_streamer->PushFrame();
+    }
+#endif
 
     system.perf_stats->EndSwap();
     rasterizer.TickFrame();

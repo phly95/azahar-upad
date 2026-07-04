@@ -176,6 +176,21 @@ public:
         return external_memory_host;
     }
 
+    /// Returns true when VK_EXT_external_memory_dma_buf is supported
+    bool IsExternalMemoryDmaBufSupported() const {
+        return external_memory_dma_buf;
+    }
+
+    /// Returns true when VK_KHR_external_memory_fd is supported
+    bool IsExternalMemoryFdSupported() const {
+        return external_memory_fd;
+    }
+
+    /// Returns true when VK_EXT_image_drm_format_modifier is supported
+    bool IsDrmFormatModifierSupported() const {
+        return drm_format_modifier;
+    }
+
     /// Returns true when VK_KHR_fragment_shader_barycentric is supported
     bool IsFragmentShaderBarycentricSupported() const {
         return fragment_shader_barycentric;
@@ -334,6 +349,9 @@ protected:
     bool fragment_shader_barycentric{};
     bool shader_stencil_export{};
     bool external_memory_host{};
+    bool external_memory_dma_buf{};
+    bool external_memory_fd{};
+    bool drm_format_modifier{};
     u64 min_imported_host_pointer_alignment{};
     bool layered_rendering_supported{true};
     bool tooling_info{};

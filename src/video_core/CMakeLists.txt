@@ -207,7 +207,7 @@ if (ENABLE_VULKAN)
     if (ENABLE_GSTREAMER)
         find_package(PkgConfig)
         if (PkgConfig_FOUND)
-            pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
+            pkg_check_modules(GST REQUIRED IMPORTED_TARGET gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-allocators-1.0)
             target_sources(video_core PRIVATE
                 renderer_vulkan/vk_frame_streamer.cpp
                 renderer_vulkan/vk_frame_streamer.h

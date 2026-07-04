@@ -142,6 +142,10 @@ RendererVulkan::~RendererVulkan() {
     main_present_window.WaitPresent();
     device.waitIdle();
 
+#ifdef HAVE_GSTREAMER
+    rasterizer.SetFrameStreamer(nullptr);
+#endif
+
     device.destroyShaderModule(present_vertex_shader);
     for (u32 i = 0; i < PRESENT_PIPELINES; i++) {
         device.destroyPipeline(present_pipelines[i]);
@@ -1126,8 +1130,11 @@ void RendererVulkan::UpdateStreaming() {
     const bool enabled = Settings::values.streaming_enabled.GetValue();
     u32 scale = Settings::values.resolution_factor.GetValue();
     if (scale == 0) scale = 1;
-    const u32 target_w = Core::kScreenTopWidth * scale;
-    const u32 target_h = Core::kScreenTopHeight * scale;
+    const bool swapped = Settings::values.swap_screen.GetValue();
+    const u32 screen_width = swapped ? Core::kScreenTopWidth : Core::kScreenBottomWidth;
+    const u32 screen_height = Core::kScreenTopHeight;
+    const u32 target_w = screen_width * scale;
+    const u32 target_h = screen_height * scale;
 
     // Detect if settings changed and streaming texture needs recreation
     const bool size_changed = frame_streamer &&
@@ -1157,8 +1164,6 @@ void RendererVulkan::UpdateStreaming() {
             Settings::values.streaming_target_ip.GetValue(),
             static_cast<u16>(Settings::values.streaming_target_port.GetValue()));
         prev_streaming_enabled = enabled;
-        prev_streaming_width = target_w;
-        prev_streaming_height = target_h;
     }
 #endif
 }
@@ -1221,8 +1226,7 @@ void RendererVulkan::SwapBuffers() {
 
 #ifdef HAVE_GSTREAMER
     if (frame_streamer && frame_streamer->IsActive()) {
-        // GPU work is complete (either from Flush in RenderToWindow or Finish above).
-        // Export the DMA-BUF and push to the encoder.
+        scheduler.Finish();
         frame_streamer->PushFrame();
     }
 #endif

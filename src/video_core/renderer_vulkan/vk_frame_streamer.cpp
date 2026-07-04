@@ -13,7 +13,6 @@
 #ifdef HAVE_GSTREAMER
 #include <gst/app/gstappsrc.h>
 #include <gst/video/video.h>
-#include <gst/video/videooverlay.h>
 #endif
 
 namespace Vulkan {
@@ -67,7 +66,11 @@ void FrameStreamer::Stop() {
 void FrameStreamer::CreateStreamingTexture() {
     vk::Device device = instance.GetDevice();
 
+    vk::ExternalMemoryImageCreateInfo external_info{};
+    external_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
+
     const vk::ImageCreateInfo image_info = {
+        .pNext = &external_info,
         .imageType = vk::ImageType::e2D,
         .format = vk::Format::eR8G8B8A8Unorm,
         .extent = {width, height, 1},
@@ -80,25 +83,37 @@ void FrameStreamer::CreateStreamingTexture() {
         .initialLayout = vk::ImageLayout::eUndefined,
     };
 
-    // Enable DMA-BUF external memory export
-    vk::ExternalMemoryImageCreateInfo external_info{};
-    external_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
+    streaming_image = device.createImage(image_info);
 
-    VkImageCreateInfo unsafe_image_info = static_cast<VkImageCreateInfo>(image_info);
-    unsafe_image_info.pNext = &external_info;
+    vk::MemoryRequirements mem_reqs = device.getImageMemoryRequirements(streaming_image);
+    vk::PhysicalDeviceMemoryProperties mem_props = instance.GetPhysicalDevice().getMemoryProperties();
 
-    VmaAllocationCreateInfo alloc_info{};
-    alloc_info.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
-    alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-
-    VkImage unsafe_image{};
-    VkResult result = vmaCreateImage(instance.GetAllocator(), &unsafe_image_info, &alloc_info,
-                                     &unsafe_image, &streaming_allocation, nullptr);
-    if (result != VK_SUCCESS) {
-        LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to create streaming texture: {}", result);
+    u32 memory_type_index = 0;
+    bool found = false;
+    for (u32 i = 0; i < mem_props.memoryTypeCount; ++i) {
+        if ((mem_reqs.memoryTypeBits & (1 << i)) &&
+            (mem_props.memoryTypes[i].propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal)) {
+            memory_type_index = i;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to find suitable memory type");
         return;
     }
-    streaming_image = vk::Image{unsafe_image};
+
+    vk::ExportMemoryAllocateInfo export_alloc_info{};
+    export_alloc_info.handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eDmaBufEXT;
+
+    vk::MemoryAllocateInfo alloc_info = {
+        .pNext = &export_alloc_info,
+        .allocationSize = mem_reqs.size,
+        .memoryTypeIndex = memory_type_index,
+    };
+
+    streaming_memory = device.allocateMemory(alloc_info);
+    device.bindImageMemory(streaming_image, streaming_memory, 0);
 
     // Query the DRM format modifier
     if (auto func = reinterpret_cast<PFN_vkGetImageDrmFormatModifierPropertiesEXT>(
@@ -139,29 +154,35 @@ void FrameStreamer::CreateStreamingTexture() {
 void FrameStreamer::DestroyStreamingTexture() {
     vk::Device device = instance.GetDevice();
 
+    if (cached_fd >= 0) {
+        close(cached_fd);
+        cached_fd = -1;
+    }
+
     if (streaming_image_view) {
         device.destroyImageView(streaming_image_view);
         streaming_image_view = VK_NULL_HANDLE;
     }
     if (streaming_image) {
-        vmaDestroyImage(instance.GetAllocator(), streaming_image, streaming_allocation);
+        device.destroyImage(streaming_image);
         streaming_image = VK_NULL_HANDLE;
-        streaming_allocation = nullptr;
+    }
+    if (streaming_memory) {
+        device.freeMemory(streaming_memory);
+        streaming_memory = VK_NULL_HANDLE;
     }
 }
 
 int FrameStreamer::ExportDmaBuf() {
-    if (!streaming_image) {
+    if (!streaming_memory) {
         return -1;
     }
 
+    if (cached_fd >= 0) {
+        return dup(cached_fd);
+    }
+
     vk::Device device = instance.GetDevice();
-
-    // Get the VMA allocation info to access the device memory
-    VmaAllocationInfo alloc_info{};
-    vmaGetAllocationInfo(instance.GetAllocator(), streaming_allocation, &alloc_info);
-
-    // Export the device memory as a DMA-BUF fd
     auto func = reinterpret_cast<PFN_vkGetMemoryFdKHR>(
         device.getProcAddr("vkGetMemoryFdKHR"));
     if (!func) {
@@ -171,16 +192,15 @@ int FrameStreamer::ExportDmaBuf() {
 
     VkMemoryGetFdInfoKHR fd_info{};
     fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
-    fd_info.memory = alloc_info.deviceMemory;
+    fd_info.memory = streaming_memory;
     fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 
-    int fd = -1;
-    if (func(device, &fd_info, &fd) != VK_SUCCESS) {
+    if (func(device, &fd_info, &cached_fd) != VK_SUCCESS) {
         LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to export DMA-BUF fd.");
         return -1;
     }
 
-    return fd;
+    return dup(cached_fd);
 }
 
 bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source,
@@ -193,7 +213,7 @@ bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source,
     const vk::ImageMemoryBarrier src_barrier = {
         .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead,
         .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-        .oldLayout = vk::ImageLayout::eGeneral,
+        .oldLayout = vk::ImageLayout::eUndefined,
         .newLayout = vk::ImageLayout::eTransferSrcOptimal,
         .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -287,7 +307,7 @@ bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source,
 
 void FrameStreamer::PushFrame() {
 #ifdef HAVE_GSTREAMER
-    if (!active || !appsrc) {
+    if (!active || !appsrc || !allocator) {
         return;
     }
 
@@ -297,35 +317,20 @@ void FrameStreamer::PushFrame() {
     }
 
     // Create GstBuffer wrapping the DMA-BUF fd
-    GstAllocator* allocator = gst_fd_allocator_new();
     GstMemory* mem = gst_fd_allocator_alloc(allocator, fd, stride * height,
                                             GST_FD_MEMORY_FLAG_NONE);
     GstBuffer* buf = gst_buffer_new();
     gst_buffer_append_memory(buf, mem);
 
-    // Set up video info with the correct stride
-    GstVideoInfo vinfo;
-    gst_video_info_set_format(&vinfo, GST_VIDEO_FORMAT_RGBA, width, height);
-    vinfo.stride[0] = static_cast<gint>(stride);
-    vinfo.offset[0] = 0;
-
-    GstCaps* caps = gst_video_info_to_caps(&vinfo);
-    // Mark as DMA-BUF backed memory
-    gst_caps_set_features(caps, 0, gst_caps_features_new("memory:DMABuf", NULL));
-
-    gst_buffer_set_caps(buf, caps);
-    gst_caps_unref(caps);
-
-    // Set PTS for proper timing
-    GstClockTime pts = gst_element_get_current_time(pipeline);
-    GST_BUFFER_PTS(buf) = pts;
-    GST_BUFFER_DTS(buf) = pts;
+    static guint64 frame_count = 0;
+    GST_BUFFER_PTS(buf) = gst_util_uint64_scale(frame_count, GST_SECOND, 30);
+    GST_BUFFER_DTS(buf) = GST_BUFFER_PTS(buf);
     GST_BUFFER_DURATION(buf) = gst_util_uint64_scale_int(1, GST_SECOND, 30); // 30fps
+    frame_count++;
 
     GstFlowReturn ret;
     g_signal_emit_by_name(appsrc, "push-buffer", buf, &ret);
     gst_buffer_unref(buf);
-    gst_object_unref(allocator);
 
     if (ret != GST_FLOW_OK) {
         LOG_WARNING(Render_Vulkan, "FrameStreamer: GStreamer push failed: {}", ret);
@@ -335,28 +340,7 @@ void FrameStreamer::PushFrame() {
 
 #ifdef HAVE_GSTREAMER
 
-static gboolean bus_call(GstBus* /*bus*/, GstMessage* msg, gpointer data) {
-    auto* loop = static_cast<GMainLoop*>(data);
-    switch (GST_MESSAGE_TYPE(msg)) {
-    case GST_MESSAGE_EOS:
-        LOG_INFO(Render_Vulkan, "FrameStreamer: Stream ended.");
-        g_main_loop_quit(loop);
-        break;
-    case GST_MESSAGE_ERROR: {
-        gchar* debug;
-        GError* error;
-        gst_message_parse_error(msg, &error, &debug);
-        LOG_ERROR(Render_Vulkan, "FrameStreamer: GStreamer error: {}", error->message);
-        g_error_free(error);
-        g_free(debug);
-        g_main_loop_quit(loop);
-        break;
-    }
-    default:
-        break;
-    }
-    return TRUE;
-}
+
 
 void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_port) {
     if (!gst_is_initialized()) {
@@ -369,7 +353,7 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
     GstElement* test_encoder = gst_element_factory_make("vaapih264enc", nullptr);
     if (test_encoder) {
         gst_object_unref(test_encoder);
-        enc_desc = "vaapih264enc extra-controllers=\"ro\" rate-control=cqp quant-i=22 quant-p=23";
+        enc_desc = "vaapih264enc rate-control=cqp quant-i=22 quant-p=23";
     } else {
         enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
     }
@@ -402,10 +386,16 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
     // Configure appsrc caps
     GstVideoInfo vinfo;
     gst_video_info_set_format(&vinfo, GST_VIDEO_FORMAT_RGBA, width, height);
+    vinfo.fps_n = 30;
+    vinfo.fps_d = 1;
     GstCaps* caps = gst_video_info_to_caps(&vinfo);
     gst_caps_set_features(caps, 0, gst_caps_features_new("memory:DMABuf", NULL));
     g_object_set(appsrc, "caps", caps, NULL);
     gst_caps_unref(caps);
+
+    if (!allocator) {
+        allocator = gst_fd_allocator_new();
+    }
 
     // Start the pipeline
     GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
@@ -432,6 +422,10 @@ void FrameStreamer::CleanupGstPipeline() {
     if (pipeline) {
         gst_object_unref(pipeline);
         pipeline = nullptr;
+    }
+    if (allocator) {
+        gst_object_unref(allocator);
+        allocator = nullptr;
     }
 }
 

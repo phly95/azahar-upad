@@ -834,12 +834,12 @@ void QtConfig::ReadStreamingValues() {
     ReadBasicSetting(Settings::values.streaming_enabled);
     Settings::values.streaming_target_ip =
         ReadSetting(Settings::QKeys::streaming_target_ip,
-                     QString::fromStdString(Settings::values.streaming_target_ip.GetValue()))
+                     QString::fromStdString(Settings::values.streaming_target_ip.GetDefault()))
             .toString()
             .toStdString();
     Settings::values.streaming_target_port = static_cast<u16>(
         ReadSetting(Settings::QKeys::streaming_target_port,
-                     Settings::values.streaming_target_port.GetValue())
+                     Settings::values.streaming_target_port.GetDefault())
             .toInt());
 
     qt_config->endGroup();

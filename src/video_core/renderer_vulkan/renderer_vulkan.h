@@ -161,8 +161,6 @@ private:
 #ifdef HAVE_GSTREAMER
     std::unique_ptr<FrameStreamer> frame_streamer;
     bool prev_streaming_enabled = false;
-    u32 prev_streaming_width = 0;
-    u32 prev_streaming_height = 0;
 #endif
 };
 

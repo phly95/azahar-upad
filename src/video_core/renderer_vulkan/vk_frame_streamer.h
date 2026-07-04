@@ -14,6 +14,7 @@
 #ifdef HAVE_GSTREAMER
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
+#include <gst/allocators/gstfdmemory.h>
 #endif
 
 namespace Vulkan {
@@ -76,14 +77,16 @@ private:
 
     // Exportable streaming texture (RGBA8, linear tiling)
     vk::Image streaming_image;
-    VmaAllocation streaming_allocation = nullptr;
+    vk::DeviceMemory streaming_memory;
     vk::ImageView streaming_image_view;
     u64 drm_modifier = 0;
     u32 stride = 0;
+    int cached_fd = -1;
 
 #ifdef HAVE_GSTREAMER
     GstElement* pipeline = nullptr;
     GstElement* appsrc = nullptr;
+    GstAllocator* allocator = nullptr;
 #endif
 };
 

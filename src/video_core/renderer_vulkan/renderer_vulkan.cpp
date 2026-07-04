@@ -1136,9 +1136,17 @@ void RendererVulkan::UpdateStreaming() {
     const u32 target_w = screen_width * scale;
     const u32 target_h = screen_height * scale;
 
+    const auto& target_ip = Settings::values.streaming_target_ip.GetValue();
+    const auto target_port = static_cast<u16>(Settings::values.streaming_target_port.GetValue());
+
     // Detect if settings changed and streaming texture needs recreation
     const bool size_changed = frame_streamer &&
         (frame_streamer->GetWidth() != target_w || frame_streamer->GetHeight() != target_h);
+    const bool endpoint_changed = target_ip != prev_streaming_ip ||
+                                  target_port != prev_streaming_port;
+    const bool layout_changed = swapped != prev_swap_screen;
+    const bool needs_recreate = !frame_streamer || size_changed || endpoint_changed ||
+                                layout_changed || prev_streaming_enabled != enabled;
 
     if (!enabled) {
         if (frame_streamer) {
@@ -1152,7 +1160,7 @@ void RendererVulkan::UpdateStreaming() {
     }
 
     // Enable or recreate if needed
-    if (!frame_streamer || size_changed || prev_streaming_enabled != enabled) {
+    if (needs_recreate) {
         if (frame_streamer) {
             frame_streamer->Stop();
             rasterizer.SetFrameStreamer(nullptr);
@@ -1160,10 +1168,11 @@ void RendererVulkan::UpdateStreaming() {
         }
         frame_streamer = std::make_unique<FrameStreamer>(instance, target_w, target_h);
         rasterizer.SetFrameStreamer(frame_streamer.get());
-        frame_streamer->Start(
-            Settings::values.streaming_target_ip.GetValue(),
-            static_cast<u16>(Settings::values.streaming_target_port.GetValue()));
+        frame_streamer->Start(target_ip, target_port);
         prev_streaming_enabled = enabled;
+        prev_streaming_ip = target_ip;
+        prev_streaming_port = target_port;
+        prev_swap_screen = swapped;
     }
 #endif
 }
@@ -1189,8 +1198,8 @@ void RendererVulkan::SwapBuffers() {
 #endif
 
     const Layout::FramebufferLayout& layout = render_window.GetFramebufferLayout();
-    PrepareRendertarget();
     UpdateStreaming();
+    PrepareRendertarget();
     RenderScreenshot();
     isSecondaryWindow = false;
     RenderToWindow(main_present_window, layout, false);

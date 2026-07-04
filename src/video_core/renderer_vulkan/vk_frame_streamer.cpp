@@ -11,9 +11,10 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 
 #ifdef HAVE_GSTREAMER
-#include <gst/allocators/gstfdmemory.h>
+#include <gst/allocators/gstdmabuf.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/video/video.h>
+#include <gst/video/gstvideometa.h>
 #endif
 
 namespace Vulkan {
@@ -23,7 +24,19 @@ FrameStreamer::FrameStreamer(const Instance& instance, u32 width, u32 height)
     if (instance.IsExternalMemoryDmaBufSupported() &&
         instance.IsExternalMemoryFdSupported() &&
         instance.IsDrmFormatModifierSupported()) {
-        CreateStreamingTexture();
+        bool all_ok = true;
+        for (size_t i = 0; i < NUM_FRAMES; ++i) {
+            CreateFrameResources(frames[i]);
+            if (!frames[i].image) {
+                all_ok = false;
+                break;
+            }
+        }
+        if (!all_ok) {
+            for (size_t i = 0; i < NUM_FRAMES; ++i) {
+                DestroyFrameResources(frames[i]);
+            }
+        }
     } else {
         LOG_WARNING(Render_Vulkan,
                     "FrameStreamer: DMA-BUF extensions not available. "
@@ -33,11 +46,13 @@ FrameStreamer::FrameStreamer(const Instance& instance, u32 width, u32 height)
 
 FrameStreamer::~FrameStreamer() {
     Stop();
-    DestroyStreamingTexture();
+    for (size_t i = 0; i < NUM_FRAMES; ++i) {
+        DestroyFrameResources(frames[i]);
+    }
 }
 
 void FrameStreamer::Start(const std::string& target_ip, u16 target_port) {
-    if (!streaming_image) {
+    if (!frames[0].image) {
         LOG_ERROR(Render_Vulkan, "FrameStreamer: No streaming texture available.");
         return;
     }
@@ -46,6 +61,7 @@ void FrameStreamer::Start(const std::string& target_ip, u16 target_port) {
     if (active) {
         Stop();
     }
+    frame_count = 0;
     InitGstPipeline(target_ip, target_port);
     active = (pipeline != nullptr);
     if (active) {
@@ -64,7 +80,7 @@ void FrameStreamer::Stop() {
     active = false;
 }
 
-void FrameStreamer::CreateStreamingTexture() {
+void FrameStreamer::CreateFrameResources(FrameResources& frame) {
     vk::Device device = instance.GetDevice();
 
     vk::ExternalMemoryImageCreateInfo external_info{};
@@ -83,9 +99,9 @@ void FrameStreamer::CreateStreamingTexture() {
     image_info.sharingMode = vk::SharingMode::eExclusive;
     image_info.initialLayout = vk::ImageLayout::eUndefined;
 
-    streaming_image = device.createImage(image_info);
+    vk::Image local_image = device.createImage(image_info);
 
-    vk::MemoryRequirements mem_reqs = device.getImageMemoryRequirements(streaming_image);
+    vk::MemoryRequirements mem_reqs = device.getImageMemoryRequirements(local_image);
     vk::PhysicalDeviceMemoryProperties mem_props =
         instance.GetPhysicalDevice().getMemoryProperties();
 
@@ -102,6 +118,7 @@ void FrameStreamer::CreateStreamingTexture() {
     }
     if (!found) {
         LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to find suitable memory type");
+        device.destroyImage(local_image);
         return;
     }
 
@@ -113,31 +130,26 @@ void FrameStreamer::CreateStreamingTexture() {
     alloc_info.allocationSize = mem_reqs.size;
     alloc_info.memoryTypeIndex = memory_type_index;
 
-    streaming_memory = device.allocateMemory(alloc_info);
-    device.bindImageMemory(streaming_image, streaming_memory, 0);
+    vk::DeviceMemory local_memory = device.allocateMemory(alloc_info);
+    device.bindImageMemory(local_image, local_memory, 0);
 
-    // Query the DRM format modifier
     if (auto func = reinterpret_cast<PFN_vkGetImageDrmFormatModifierPropertiesEXT>(
             device.getProcAddr("vkGetImageDrmFormatModifierPropertiesEXT"))) {
         VkImageDrmFormatModifierPropertiesEXT props{};
         props.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT;
-        if (func(device, streaming_image, &props) == VK_SUCCESS) {
+        if (func(device, local_image, &props) == VK_SUCCESS) {
             drm_modifier = props.drmFormatModifier;
         }
     }
 
-    // Query the stride for DMA-BUF layout
     vk::ImageSubresource subres{};
     subres.aspectMask = vk::ImageAspectFlagBits::eColor;
-    subres.mipLevel = 0;
-    subres.arrayLayer = 0;
     vk::SubresourceLayout layout;
-    device.getImageSubresourceLayout(streaming_image, &subres, &layout);
-    stride = static_cast<u32>(layout.rowPitch);
+    device.getImageSubresourceLayout(local_image, &subres, &layout);
+    frame.stride = static_cast<u32>(layout.rowPitch);
 
-    // Create image view
     vk::ImageViewCreateInfo view_info{};
-    view_info.image = streaming_image;
+    view_info.image = local_image;
     view_info.viewType = vk::ImageViewType::e2D;
     view_info.format = vk::Format::eR8G8B8A8Unorm;
     view_info.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -145,42 +157,46 @@ void FrameStreamer::CreateStreamingTexture() {
     view_info.subresourceRange.levelCount = 1;
     view_info.subresourceRange.baseArrayLayer = 0;
     view_info.subresourceRange.layerCount = 1;
-    streaming_image_view = device.createImageView(view_info);
+    vk::ImageView local_view = device.createImageView(view_info);
+
+    frame.image = local_image;
+    frame.memory = local_memory;
+    frame.image_view = local_view;
 
     LOG_INFO(Render_Vulkan,
-             "FrameStreamer: Streaming texture created ({}x{}, modifier=0x{:x}, stride={})",
-             width, height, drm_modifier, stride);
+             "FrameStreamer: Buffer created ({}x{}, modifier=0x{:x}, stride={})",
+             width, height, drm_modifier, frame.stride);
 }
 
-void FrameStreamer::DestroyStreamingTexture() {
+void FrameStreamer::DestroyFrameResources(FrameResources& frame) {
     vk::Device device = instance.GetDevice();
 
-    if (cached_fd >= 0) {
-        close(cached_fd);
-        cached_fd = -1;
+    if (frame.cached_fd >= 0) {
+        close(frame.cached_fd);
+        frame.cached_fd = -1;
     }
 
-    if (streaming_image_view) {
-        device.destroyImageView(streaming_image_view);
-        streaming_image_view = VK_NULL_HANDLE;
+    if (frame.image_view) {
+        device.destroyImageView(frame.image_view);
+        frame.image_view = VK_NULL_HANDLE;
     }
-    if (streaming_image) {
-        device.destroyImage(streaming_image);
-        streaming_image = VK_NULL_HANDLE;
+    if (frame.image) {
+        device.destroyImage(frame.image);
+        frame.image = VK_NULL_HANDLE;
     }
-    if (streaming_memory) {
-        device.freeMemory(streaming_memory);
-        streaming_memory = VK_NULL_HANDLE;
+    if (frame.memory) {
+        device.freeMemory(frame.memory);
+        frame.memory = VK_NULL_HANDLE;
     }
 }
 
-int FrameStreamer::ExportDmaBuf() {
-    if (!streaming_memory) {
+int FrameStreamer::ExportDmaBuf(FrameResources& frame) {
+    if (!frame.memory) {
         return -1;
     }
 
-    if (cached_fd >= 0) {
-        return dup(cached_fd);
+    if (frame.cached_fd >= 0) {
+        return dup(frame.cached_fd);
     }
 
     vk::Device device = instance.GetDevice();
@@ -193,20 +209,21 @@ int FrameStreamer::ExportDmaBuf() {
 
     VkMemoryGetFdInfoKHR fd_info{};
     fd_info.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR;
-    fd_info.memory = streaming_memory;
+    fd_info.memory = frame.memory;
     fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 
-    if (func(device, &fd_info, &cached_fd) != VK_SUCCESS) {
+    if (func(device, &fd_info, &frame.cached_fd) != VK_SUCCESS) {
         LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to export DMA-BUF fd.");
         return -1;
     }
 
-    return dup(cached_fd);
+    return dup(frame.cached_fd);
 }
 
 bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 src_width,
                                u32 src_height) {
-    if (!streaming_image) {
+    auto& frame = frames[write_index];
+    if (!frame.image) {
         return false;
     }
 
@@ -229,7 +246,6 @@ bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 s
         return barrier;
     };
 
-    // Transition source to transfer src optimal
     auto src_barrier = MakeBarrier(
         source, vk::ImageLayout::eGeneral, vk::ImageLayout::eTransferSrcOptimal,
         vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead,
@@ -239,15 +255,13 @@ bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 s
                            vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion,
                            {}, {}, src_barrier);
 
-    // Transition streaming texture to transfer dst
-    auto dst_barrier = MakeBarrier(streaming_image, vk::ImageLayout::eUndefined,
+    auto dst_barrier = MakeBarrier(frame.image, vk::ImageLayout::eUndefined,
                                    vk::ImageLayout::eTransferDstOptimal,
                                    vk::AccessFlagBits::eNone, vk::AccessFlagBits::eTransferWrite);
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
                            vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion,
                            {}, {}, dst_barrier);
 
-    // Blit from source to streaming texture (handles format conversion on GPU)
     vk::ImageBlit blit{};
     blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
     blit.srcSubresource.mipLevel = 0;
@@ -261,17 +275,15 @@ bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 s
     blit.dstSubresource.layerCount = 1;
     blit.dstOffsets[0] = vk::Offset3D{0, 0, 0};
     blit.dstOffsets[1] = vk::Offset3D{static_cast<s32>(width), static_cast<s32>(height), 1};
-    cmdbuf.blitImage(source, vk::ImageLayout::eTransferSrcOptimal, streaming_image,
+    cmdbuf.blitImage(source, vk::ImageLayout::eTransferSrcOptimal, frame.image,
                      vk::ImageLayout::eTransferDstOptimal, blit, vk::Filter::eLinear);
 
-    // Restore source image to general
     auto src_restore = MakeBarrier(
         source, vk::ImageLayout::eTransferSrcOptimal, vk::ImageLayout::eGeneral,
         vk::AccessFlagBits::eTransferRead,
         vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eShaderRead);
 
-    // Transition streaming texture to general (needed for DMA-BUF export)
-    auto final_barrier = MakeBarrier(streaming_image, vk::ImageLayout::eTransferDstOptimal,
+    auto final_barrier = MakeBarrier(frame.image, vk::ImageLayout::eTransferDstOptimal,
                                      vk::ImageLayout::eGeneral,
                                      vk::AccessFlagBits::eTransferWrite,
                                      vk::AccessFlagBits::eMemoryRead);
@@ -290,18 +302,38 @@ void FrameStreamer::PushFrame() {
         return;
     }
 
-    const int fd = ExportDmaBuf();
+    const u32 push_index = write_index;
+    write_index = (write_index + 1) % NUM_FRAMES;
+
+    auto& frame = frames[push_index];
+
+    const int fd = ExportDmaBuf(frame);
     if (fd < 0) {
         return;
     }
 
-    // Create GstBuffer wrapping the DMA-BUF fd
     GstMemory* mem =
-        gst_fd_allocator_alloc(allocator, fd, stride * height, GST_FD_MEMORY_FLAG_NONE);
+        gst_dmabuf_allocator_alloc(allocator, fd, frame.stride * height);
+    if (!mem) {
+        close(fd);
+        LOG_WARNING(Render_Vulkan, "FrameStreamer: Failed to allocate GstMemory.");
+        return;
+    }
+
     GstBuffer* buf = gst_buffer_new();
+    if (!buf) {
+        gst_memory_unref(mem);
+        LOG_WARNING(Render_Vulkan, "FrameStreamer: Failed to allocate GstBuffer.");
+        return;
+    }
     gst_buffer_append_memory(buf, mem);
 
-    static guint64 frame_count = 0;
+    gsize offsets[GST_VIDEO_MAX_PLANES] = {};
+    gint strides[GST_VIDEO_MAX_PLANES] = {};
+    strides[0] = static_cast<gint>(frame.stride);
+    gst_buffer_add_video_meta_full(buf, GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_RGBA,
+                                   width, height, 1, offsets, strides);
+
     GST_BUFFER_PTS(buf) = gst_util_uint64_scale(frame_count, GST_SECOND, 30);
     GST_BUFFER_DTS(buf) = GST_BUFFER_PTS(buf);
     GST_BUFFER_DURATION(buf) = gst_util_uint64_scale_int(1, GST_SECOND, 30);
@@ -324,7 +356,6 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
         gst_init(nullptr, nullptr);
     }
 
-    // Try VA-API hardware encoder first, fall back to software x264enc
     std::string enc_desc;
     GstElement* test_encoder = gst_element_factory_make("vaapih264enc", nullptr);
     if (test_encoder) {
@@ -359,7 +390,6 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
         return;
     }
 
-    // Configure appsrc caps with framerate
     GstVideoInfo vinfo;
     gst_video_info_set_format(&vinfo, GST_VIDEO_FORMAT_RGBA, width, height);
     vinfo.fps_n = 30;
@@ -370,10 +400,9 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
     gst_caps_unref(caps);
 
     if (!allocator) {
-        allocator = gst_fd_allocator_new();
+        allocator = gst_dmabuf_allocator_new();
     }
 
-    // Start the pipeline
     GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
         LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to start pipeline.");
@@ -403,6 +432,7 @@ void FrameStreamer::CleanupGstPipeline() {
         gst_object_unref(allocator);
         allocator = nullptr;
     }
+    frame_count = 0;
 }
 
 #else

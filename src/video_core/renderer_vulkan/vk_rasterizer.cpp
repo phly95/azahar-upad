@@ -806,10 +806,11 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
         const bool swapped = Settings::values.swap_screen.GetValue();
         const u32 target_index = swapped ? 0 : 2;
         if (screen_index == target_index) {
-            scheduler.Record([this, src_image = src_surface.Image(),
+            auto* streamer = frame_streamer;
+            scheduler.Record([streamer, src_image = src_surface.Image(),
                               src_w = src_surface.GetScaledWidth(),
                               src_h = src_surface.GetScaledHeight()](vk::CommandBuffer cmdbuf) {
-                frame_streamer->RecordBlit(cmdbuf, src_image, src_w, src_h);
+                streamer->RecordBlit(cmdbuf, src_image, src_w, src_h);
             });
         }
     }

@@ -19,7 +19,9 @@ ConfigureGraphics::ConfigureGraphics(QString gl_renderer, std::span<const QStrin
 
     SetupPerGameUI();
 
-    ui->graphics_api_combo->setEnabled(!is_powered_on);
+    // Vulkan-only build: force Vulkan and lock the combo
+    Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
+    ui->graphics_api_combo->setEnabled(false);
     ui->physical_device_combo->setEnabled(!is_powered_on);
     ui->toggle_accurate_mul->setEnabled(!is_powered_on);
     ui->toggle_async_shaders->setEnabled(!is_powered_on);
@@ -127,7 +129,7 @@ void ConfigureGraphics::SetConfiguration() {
         }
     } else {
         ui->graphics_api_combo->setCurrentIndex(
-            static_cast<int>(Settings::values.graphics_api.GetValue()));
+            static_cast<int>(Settings::GraphicsAPI::Vulkan));
         ui->physical_device_combo->setCurrentIndex(
             static_cast<int>(Settings::values.physical_device.GetValue()));
         ui->texture_sampling_combobox->setCurrentIndex(
@@ -154,8 +156,8 @@ void ConfigureGraphics::SetConfiguration() {
 }
 
 void ConfigureGraphics::ApplyConfiguration() {
-    ConfigurationShared::ApplyPerGameSetting(&Settings::values.graphics_api,
-                                             ui->graphics_api_combo);
+    // Vulkan-only build: always force Vulkan
+    Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
     ConfigurationShared::ApplyPerGameSetting(&Settings::values.physical_device,
                                              ui->physical_device_combo);
     ConfigurationShared::ApplyPerGameSetting(&Settings::values.async_shader_compilation,

@@ -34,7 +34,8 @@ public:
     void Start(const std::string& target_ip, u16 target_port);
     void Stop();
 
-    bool RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 src_width, u32 src_height);
+    bool RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 src_width, u32 src_height,
+                    u32 src_offset_x = 0, u32 src_offset_y = 0);
     void PushFrame();
 
     u32 GetWidth() const {

@@ -164,6 +164,9 @@ private:
     std::string prev_streaming_ip;
     u16 prev_streaming_port = 0;
     Settings::StreamingScreen prev_streaming_screen = Settings::StreamingScreen::Bottom;
+    Frame streaming_frame{};
+    u32 streaming_frame_w = 0;
+    u32 streaming_frame_h = 0;
 #endif
 };
 

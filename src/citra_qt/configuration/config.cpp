@@ -833,6 +833,15 @@ void QtConfig::ReadStreamingValues() {
 
     ReadBasicSetting(Settings::values.streaming_enabled);
     ReadBasicSetting(Settings::values.streaming_screen);
+    ReadBasicSetting(Settings::values.streaming_encoder);
+    Settings::values.streaming_gpu_device =
+        ReadSetting(Settings::QKeys::streaming_gpu_device,
+                     QString::fromStdString(Settings::values.streaming_gpu_device.GetDefault()))
+            .toString()
+            .toStdString();
+    ReadBasicSetting(Settings::values.streaming_custom_resolution);
+    ReadBasicSetting(Settings::values.streaming_width);
+    ReadBasicSetting(Settings::values.streaming_height);
     Settings::values.streaming_target_ip =
         ReadSetting(Settings::QKeys::streaming_target_ip,
                      QString::fromStdString(Settings::values.streaming_target_ip.GetDefault()))
@@ -1388,6 +1397,13 @@ void QtConfig::SaveStreamingValues() {
 
     WriteBasicSetting(Settings::values.streaming_enabled);
     WriteBasicSetting(Settings::values.streaming_screen);
+    WriteBasicSetting(Settings::values.streaming_encoder);
+    WriteSetting(Settings::QKeys::streaming_gpu_device,
+                 QString::fromStdString(Settings::values.streaming_gpu_device.GetValue()),
+                 QString::fromStdString(Settings::values.streaming_gpu_device.GetDefault()));
+    WriteBasicSetting(Settings::values.streaming_custom_resolution);
+    WriteBasicSetting(Settings::values.streaming_width);
+    WriteBasicSetting(Settings::values.streaming_height);
     WriteSetting(Settings::QKeys::streaming_target_ip,
                  QString::fromStdString(Settings::values.streaming_target_ip.GetValue()),
                  QString::fromStdString(Settings::values.streaming_target_ip.GetDefault()));

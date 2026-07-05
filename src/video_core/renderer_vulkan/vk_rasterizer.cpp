@@ -800,23 +800,6 @@ bool RasterizerVulkan::AccelerateDisplay(const Pica::FramebufferConfig& config,
 
     screen_info.image_view = src_surface.ImageView();
 
-    // Record a blit to the streaming texture if streaming is active for this screen
-#ifdef HAVE_GSTREAMER
-    if (frame_streamer && frame_streamer->IsActive()) {
-        const auto screen = Settings::values.streaming_screen.GetValue();
-        const u32 target_index =
-            (screen == Settings::StreamingScreen::Top) ? 0 : 2;
-        if (screen_index == target_index) {
-            auto* streamer = frame_streamer;
-            scheduler.Record([streamer, src_image = src_surface.Image(),
-                              src_w = src_surface.GetScaledWidth(),
-                              src_h = src_surface.GetScaledHeight()](vk::CommandBuffer cmdbuf) {
-                streamer->RecordBlit(cmdbuf, src_image, src_w, src_h);
-            });
-        }
-    }
-#endif
-
     return true;
 }
 

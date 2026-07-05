@@ -141,6 +141,14 @@ enum class StreamingScreen : u32 {
     Bottom = 1,
 };
 
+enum class StreamingEncoder : u32 {
+    Auto = 0,
+    VAAPI = 1,
+    VAAPI_LowPower = 2,
+    x264 = 3,
+    OpenH264 = 4,
+};
+
 namespace NativeButton {
 
 enum Values {
@@ -622,6 +630,11 @@ struct Values {
 
     Setting<bool> streaming_enabled{false, Keys::streaming_enabled};
     Setting<StreamingScreen> streaming_screen{StreamingScreen::Bottom, Keys::streaming_screen};
+    Setting<StreamingEncoder> streaming_encoder{StreamingEncoder::Auto, Keys::streaming_encoder};
+    Setting<std::string> streaming_gpu_device{std::string(""), Keys::streaming_gpu_device};
+    Setting<bool> streaming_custom_resolution{false, Keys::streaming_custom_resolution};
+    Setting<u32, true> streaming_width{400, 64, 3840, Keys::streaming_width};
+    Setting<u32, true> streaming_height{240, 64, 2160, Keys::streaming_height};
     Setting<std::string> streaming_target_ip{std::string("192.168.50.10"), Keys::streaming_target_ip};
     Setting<u16, true> streaming_target_port{5000, 1, 65535, Keys::streaming_target_port};
 

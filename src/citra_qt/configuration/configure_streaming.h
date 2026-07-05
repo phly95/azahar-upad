@@ -22,5 +22,8 @@ public:
     void SetConfiguration();
 
 private:
+    void UpdateCustomResolutionEnabled();
+
+private:
     std::unique_ptr<Ui::ConfigureStreaming> ui;
 };

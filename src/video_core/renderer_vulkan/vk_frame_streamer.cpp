@@ -8,6 +8,7 @@
 #include <drm/drm_fourcc.h>
 
 #include "common/logging/log.h"
+#include "common/settings.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 
 #ifdef HAVE_GSTREAMER
@@ -220,7 +221,7 @@ int FrameStreamer::ExportDmaBuf(FrameResources& frame) {
 }
 
 bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 src_width,
-                               u32 src_height) {
+                               u32 src_height, u32 src_offset_x, u32 src_offset_y) {
     auto& frame = frames[write_index];
     if (!frame.image) {
         return false;
@@ -266,8 +267,9 @@ bool FrameStreamer::RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 s
     blit.srcSubresource.mipLevel = 0;
     blit.srcSubresource.baseArrayLayer = 0;
     blit.srcSubresource.layerCount = 1;
-    blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
-    blit.srcOffsets[1] = vk::Offset3D{static_cast<s32>(src_width), static_cast<s32>(src_height), 1};
+    blit.srcOffsets[0] = vk::Offset3D{static_cast<s32>(src_offset_x), static_cast<s32>(src_offset_y), 0};
+    blit.srcOffsets[1] = vk::Offset3D{static_cast<s32>(src_offset_x + src_width),
+                                       static_cast<s32>(src_offset_y + src_height), 1};
     blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
     blit.dstSubresource.mipLevel = 0;
     blit.dstSubresource.baseArrayLayer = 0;
@@ -327,12 +329,6 @@ void FrameStreamer::PushFrame() {
     }
     gst_buffer_append_memory(buf, mem);
 
-    gsize offsets[GST_VIDEO_MAX_PLANES] = {};
-    gint strides[GST_VIDEO_MAX_PLANES] = {};
-    strides[0] = static_cast<gint>(frame.stride);
-    gst_buffer_add_video_meta_full(buf, GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_RGBA,
-                                   width, height, 1, offsets, strides);
-
     GST_BUFFER_PTS(buf) = gst_element_get_current_running_time(pipeline);
     GST_BUFFER_DTS(buf) = GST_BUFFER_PTS(buf);
     GST_BUFFER_DURATION(buf) = GST_CLOCK_TIME_NONE;
@@ -351,12 +347,48 @@ void FrameStreamer::PushFrame() {
 
 void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_port) {
     if (!gst_is_initialized()) {
+        const auto& gpu_device = Settings::values.streaming_gpu_device.GetValue();
+        if (!gpu_device.empty()) {
+            g_setenv("GST_VAAPI_DRM_DEVICE", gpu_device.c_str(), TRUE);
+            LOG_INFO(Render_Vulkan, "FrameStreamer: Set GST_VAAPI_DRM_DEVICE={}", gpu_device);
+        }
         gst_init(nullptr, nullptr);
     }
 
+    const auto encoder = Settings::values.streaming_encoder.GetValue();
+
     std::string enc_desc;
-    enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
-    LOG_INFO(Render_Vulkan, "FrameStreamer: Using x264enc");
+    switch (encoder) {
+    case Settings::StreamingEncoder::VAAPI:
+        enc_desc = "vaapih264enc rate-control=cqp init-qp=22 qp-ip=1";
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using vaapih264enc");
+        break;
+    case Settings::StreamingEncoder::VAAPI_LowPower:
+        enc_desc = "vah264lpenc rate-control=cqp init-qp=22 qp-ip=1";
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using vah264lpenc");
+        break;
+    case Settings::StreamingEncoder::x264:
+        enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using x264enc");
+        break;
+    case Settings::StreamingEncoder::OpenH264:
+        enc_desc = "openh264enc complexity=low bitrate=2000";
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using openh264enc");
+        break;
+    case Settings::StreamingEncoder::Auto:
+    default: {
+        GstElement* test = gst_element_factory_make("vaapih264enc", nullptr);
+        if (test) {
+            gst_object_unref(test);
+            enc_desc = "vaapih264enc rate-control=cqp init-qp=22 qp-ip=1";
+            LOG_INFO(Render_Vulkan, "FrameStreamer: Auto-selected vaapih264enc");
+        } else {
+            enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
+            LOG_INFO(Render_Vulkan, "FrameStreamer: Auto-selected x264enc (vaapi unavailable)");
+        }
+        break;
+    }
+    }
 
     std::string pipeline_desc = "appsrc name=src is-live=true format=3 "
                                 "! videoconvert ! " +

@@ -143,7 +143,15 @@ RendererVulkan::~RendererVulkan() {
     device.waitIdle();
 
 #ifdef HAVE_GSTREAMER
+    frame_streamer.reset();
     rasterizer.SetFrameStreamer(nullptr);
+    if (streaming_frame.image_view) {
+        device.destroyImageView(streaming_frame.image_view);
+    }
+    if (streaming_frame.image) {
+        vmaDestroyImage(instance.GetAllocator(), streaming_frame.image,
+                        streaming_frame.allocation);
+    }
 #endif
 
     device.destroyShaderModule(present_vertex_shader);
@@ -1129,14 +1137,20 @@ void RendererVulkan::UpdateStreaming() {
 #ifdef HAVE_GSTREAMER
     const bool enabled = Settings::values.streaming_enabled.GetValue();
     const auto screen = Settings::values.streaming_screen.GetValue();
-    u32 scale = Settings::values.resolution_factor.GetValue();
-    if (scale == 0) scale = 1;
-    const u32 screen_width = (screen == Settings::StreamingScreen::Top)
-                                 ? Core::kScreenTopWidth
-                                 : Core::kScreenBottomWidth;
-    const u32 screen_height = Core::kScreenTopHeight;
-    const u32 target_w = screen_width * scale;
-    const u32 target_h = screen_height * scale;
+    u32 target_w, target_h;
+    if (Settings::values.streaming_custom_resolution.GetValue()) {
+        target_w = Settings::values.streaming_width.GetValue();
+        target_h = Settings::values.streaming_height.GetValue();
+    } else {
+        u32 scale = Settings::values.resolution_factor.GetValue();
+        if (scale == 0) scale = 1;
+        const u32 screen_width = (screen == Settings::StreamingScreen::Top)
+                                     ? Core::kScreenTopWidth
+                                     : Core::kScreenBottomWidth;
+        const u32 screen_height = Core::kScreenTopHeight;
+        target_w = screen_width * scale;
+        target_h = screen_height * scale;
+    }
 
     const auto& target_ip = Settings::values.streaming_target_ip.GetValue();
     const auto target_port = static_cast<u16>(Settings::values.streaming_target_port.GetValue());
@@ -1242,6 +1256,23 @@ void RendererVulkan::SwapBuffers() {
 
 #ifdef HAVE_GSTREAMER
     if (frame_streamer && frame_streamer->IsActive()) {
+        const auto screen = Settings::values.streaming_screen.GetValue();
+        const u32 stream_w = frame_streamer->GetWidth();
+        const u32 stream_h = frame_streamer->GetHeight();
+        if (streaming_frame_w != stream_w || streaming_frame_h != stream_h) {
+            main_present_window.RecreateFrame(&streaming_frame, stream_w, stream_h);
+            streaming_frame_w = stream_w;
+            streaming_frame_h = stream_h;
+        }
+        const bool is_swapped = (screen == Settings::StreamingScreen::Bottom);
+        const auto stream_layout =
+            Layout::SingleFrameLayout(stream_w, stream_h, is_swapped, false);
+        DrawScreens(&streaming_frame, stream_layout, false);
+        auto* streamer = frame_streamer.get();
+        scheduler.Record([streamer, source = streaming_frame.image,
+                          sw = stream_w, sh = stream_h](vk::CommandBuffer cmdbuf) {
+            streamer->RecordBlit(cmdbuf, source, sw, sh);
+        });
         scheduler.Finish();
         frame_streamer->PushFrame();
     }

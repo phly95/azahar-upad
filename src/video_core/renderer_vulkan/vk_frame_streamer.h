@@ -31,7 +31,8 @@ public:
         return active;
     }
 
-    void Start(const std::string& target_ip, u16 target_port);
+    void Start(const std::string& target_ip, u16 target_port,
+               u32 bitrate_kbps = 4000, u32 qp = 22);
     void Stop();
 
     bool RecordBlit(vk::CommandBuffer cmdbuf, vk::Image source, u32 src_width, u32 src_height,
@@ -62,7 +63,8 @@ private:
     void CreateFrameResources(FrameResources& frame);
     void DestroyFrameResources(FrameResources& frame);
     int ExportDmaBuf(FrameResources& frame);
-    void InitGstPipeline(const std::string& target_ip, u16 target_port);
+    void InitGstPipeline(const std::string& target_ip, u16 target_port,
+                         u32 bitrate_kbps, u32 qp);
     void CleanupGstPipeline();
 
     const Instance& instance;

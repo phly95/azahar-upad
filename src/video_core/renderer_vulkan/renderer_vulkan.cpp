@@ -1165,6 +1165,10 @@ void RendererVulkan::UpdateStream(u32 index) {
     const auto target_port = static_cast<u16>(
         is_second ? Settings::values.streaming_target_port_2.GetValue()
                   : Settings::values.streaming_target_port.GetValue());
+    const auto bitrate = is_second ? Settings::values.streaming_bitrate_2.GetValue()
+                                   : Settings::values.streaming_bitrate.GetValue();
+    const auto qp = is_second ? Settings::values.streaming_qp_2.GetValue()
+                              : Settings::values.streaming_qp.GetValue();
 
     auto& s = streams[index];
     auto& fs = s.frame_streamer;
@@ -1172,9 +1176,12 @@ void RendererVulkan::UpdateStream(u32 index) {
     const bool size_changed = fs &&
         (fs->GetWidth() != target_w || fs->GetHeight() != target_h);
     const bool endpoint_changed = target_ip != s.prev_ip || target_port != s.prev_port;
+    const bool bitrate_changed = bitrate != s.prev_bitrate;
+    const bool qp_changed = qp != s.prev_qp;
     const bool layout_changed = screen != s.prev_screen;
     const bool needs_recreate = !fs || size_changed || endpoint_changed ||
-                                layout_changed || s.prev_enabled != enabled;
+                                bitrate_changed || qp_changed || layout_changed ||
+                                s.prev_enabled != enabled;
 
     if (!enabled) {
         if (fs) {
@@ -1194,10 +1201,12 @@ void RendererVulkan::UpdateStream(u32 index) {
             fs.reset();
         }
         fs = std::make_unique<FrameStreamer>(instance, target_w, target_h);
-        fs->Start(target_ip, target_port);
+        fs->Start(target_ip, target_port, bitrate, qp);
         s.prev_enabled = enabled;
         s.prev_ip = target_ip;
         s.prev_port = target_port;
+        s.prev_bitrate = bitrate;
+        s.prev_qp = qp;
         s.prev_screen = screen;
         LOG_INFO(Render_Vulkan, "Stream {} created ({}x{}), active={}.",
                  index, target_w, target_h, fs->IsActive());

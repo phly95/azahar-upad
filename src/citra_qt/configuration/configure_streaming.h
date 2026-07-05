@@ -24,6 +24,7 @@ public:
 
 private:
     void UpdateCustomResEnabled();
+    void UpdateEncoderControls(int stream_index);
 
     std::unique_ptr<Ui::ConfigureStreaming> ui;
 };

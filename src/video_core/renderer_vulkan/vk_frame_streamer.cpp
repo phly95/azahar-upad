@@ -52,7 +52,8 @@ FrameStreamer::~FrameStreamer() {
     }
 }
 
-void FrameStreamer::Start(const std::string& target_ip, u16 target_port) {
+void FrameStreamer::Start(const std::string& target_ip, u16 target_port,
+                         u32 bitrate_kbps, u32 qp) {
     if (!frames[0].image) {
         LOG_ERROR(Render_Vulkan, "FrameStreamer: No streaming texture available.");
         return;
@@ -62,10 +63,11 @@ void FrameStreamer::Start(const std::string& target_ip, u16 target_port) {
     if (active) {
         Stop();
     }
-    InitGstPipeline(target_ip, target_port);
+    InitGstPipeline(target_ip, target_port, bitrate_kbps, qp);
     active = (pipeline != nullptr);
     if (active) {
-        LOG_INFO(Render_Vulkan, "FrameStreamer: Streaming to {}:{}", target_ip, target_port);
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Streaming to {}:{} at {} kbps",
+                 target_ip, target_port, bitrate_kbps);
     }
 #else
     LOG_WARNING(Render_Vulkan,
@@ -345,7 +347,8 @@ void FrameStreamer::PushFrame() {
 
 #ifdef HAVE_GSTREAMER
 
-void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_port) {
+void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_port,
+                                   u32 bitrate_kbps, u32 qp) {
     if (!gst_is_initialized()) {
         const auto& gpu_device = Settings::values.streaming_gpu_device.GetValue();
         if (!gpu_device.empty()) {
@@ -360,31 +363,35 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
     std::string enc_desc;
     switch (encoder) {
     case Settings::StreamingEncoder::VAAPI:
-        enc_desc = "vaapih264enc rate-control=cqp init-qp=22 qp-ip=1";
-        LOG_INFO(Render_Vulkan, "FrameStreamer: Using vaapih264enc");
+        enc_desc = "vaapih264enc rate-control=cqp init-qp=" + std::to_string(qp) + " qp-ip=1";
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using vaapih264enc (QP={})", qp);
         break;
     case Settings::StreamingEncoder::VAAPI_LowPower:
-        enc_desc = "vah264lpenc rate-control=cqp init-qp=22 qp-ip=1";
-        LOG_INFO(Render_Vulkan, "FrameStreamer: Using vah264lpenc");
+        enc_desc = "vah264lpenc rate-control=cqp init-qp=" + std::to_string(qp) + " qp-ip=1";
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using vah264lpenc (QP={})", qp);
         break;
     case Settings::StreamingEncoder::x264:
-        enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
-        LOG_INFO(Render_Vulkan, "FrameStreamer: Using x264enc");
+        enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=" +
+                   std::to_string(bitrate_kbps);
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using x264enc at {} kbps", bitrate_kbps);
         break;
     case Settings::StreamingEncoder::OpenH264:
-        enc_desc = "openh264enc complexity=low bitrate=2000";
-        LOG_INFO(Render_Vulkan, "FrameStreamer: Using openh264enc");
+        enc_desc = "openh264enc complexity=low bitrate=" + std::to_string(bitrate_kbps);
+        LOG_INFO(Render_Vulkan, "FrameStreamer: Using openh264enc at {} kbps", bitrate_kbps);
         break;
     case Settings::StreamingEncoder::Auto:
     default: {
         GstElement* test = gst_element_factory_make("vaapih264enc", nullptr);
         if (test) {
             gst_object_unref(test);
-            enc_desc = "vaapih264enc rate-control=cqp init-qp=22 qp-ip=1";
-            LOG_INFO(Render_Vulkan, "FrameStreamer: Auto-selected vaapih264enc");
+            enc_desc = "vaapih264enc rate-control=cqp init-qp=" + std::to_string(qp) + " qp-ip=1";
+            LOG_INFO(Render_Vulkan, "FrameStreamer: Auto-selected vaapih264enc (QP={})", qp);
         } else {
-            enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
-            LOG_INFO(Render_Vulkan, "FrameStreamer: Auto-selected x264enc (vaapi unavailable)");
+            enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=" +
+                       std::to_string(bitrate_kbps);
+            LOG_INFO(Render_Vulkan,
+                     "FrameStreamer: Auto-selected x264enc at {} kbps (vaapi unavailable)",
+                     bitrate_kbps);
         }
         break;
     }
@@ -460,7 +467,8 @@ void FrameStreamer::CleanupGstPipeline() {
 
 #else
 
-void FrameStreamer::InitGstPipeline(const std::string& /*target_ip*/, u16 /*target_port*/) {}
+void FrameStreamer::InitGstPipeline(const std::string& /*target_ip*/, u16 /*target_port*/,
+                                   u32 /*bitrate_kbps*/, u32 /*qp*/) {}
 void FrameStreamer::CleanupGstPipeline() {}
 
 #endif

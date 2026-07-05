@@ -47,67 +47,80 @@
             <item><property name="text"><string>OpenH264 (Software)</string></property></item>
            </widget>
           </item>
-          <item row="3" column="0">
-           <widget class="QLabel" name="streaming_gpu_label">
-            <property name="text"><string>GPU Device:</string></property>
-           </widget>
-          </item>
-          <item row="3" column="1">
-           <widget class="QLineEdit" name="streaming_gpu_edit">
-            <property name="placeholderText"><string>/dev/dri/renderD128 (empty=default)</string></property>
-           </widget>
-          </item>
-          <item row="4" column="0" colspan="2">
-           <widget class="QCheckBox" name="streaming_custom_res_check">
-            <property name="text"><string>Custom Resolution (overrides resolution factor)</string></property>
-           </widget>
-          </item>
-          <item row="5" column="0">
-           <widget class="QLabel" name="streaming_width_label">
-            <property name="text"><string>Width:</string></property>
-           </widget>
-          </item>
-          <item row="5" column="1">
-           <widget class="QSpinBox" name="streaming_width_spin">
-            <property name="minimum"><number>64</number></property>
-            <property name="maximum"><number>3840</number></property>
-            <property name="value"><number>400</number></property>
-           </widget>
-          </item>
-          <item row="6" column="0">
-           <widget class="QLabel" name="streaming_height_label">
-            <property name="text"><string>Height:</string></property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QSpinBox" name="streaming_height_spin">
-            <property name="minimum"><number>64</number></property>
-            <property name="maximum"><number>2160</number></property>
-            <property name="value"><number>240</number></property>
-           </widget>
-          </item>
-          <item row="7" column="0">
-           <widget class="QLabel" name="target_ip_label">
-            <property name="text"><string>Target IP:</string></property>
-           </widget>
-          </item>
-          <item row="7" column="1">
-           <widget class="QLineEdit" name="target_ip_edit">
-            <property name="placeholderText"><string>192.168.50.10</string></property>
-           </widget>
-          </item>
-          <item row="8" column="0">
-           <widget class="QLabel" name="target_port_label">
-            <property name="text"><string>Target Port:</string></property>
-           </widget>
-          </item>
-          <item row="8" column="1">
-           <widget class="QSpinBox" name="target_port_spin">
-            <property name="minimum"><number>1</number></property>
-            <property name="maximum"><number>65535</number></property>
-            <property name="value"><number>5000</number></property>
-           </widget>
-          </item>
+           <item row="3" column="0">
+            <widget class="QLabel" name="streaming_bitrate_label">
+             <property name="text"><string>Bitrate (kbps):</string></property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <widget class="QSpinBox" name="streaming_bitrate_spin">
+             <property name="minimum"><number>100</number></property>
+             <property name="maximum"><number>100000</number></property>
+             <property name="value"><number>4000</number></property>
+             <property name="suffix"><string> kbps</string></property>
+            </widget>
+           </item>
+           <item row="4" column="0">
+            <widget class="QLabel" name="streaming_gpu_label">
+             <property name="text"><string>GPU Device:</string></property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <widget class="QLineEdit" name="streaming_gpu_edit">
+             <property name="placeholderText"><string>/dev/dri/renderD128 (empty=default)</string></property>
+            </widget>
+           </item>
+           <item row="5" column="0" colspan="2">
+            <widget class="QCheckBox" name="streaming_custom_res_check">
+             <property name="text"><string>Custom Resolution (overrides resolution factor)</string></property>
+            </widget>
+           </item>
+           <item row="6" column="0">
+            <widget class="QLabel" name="streaming_width_label">
+             <property name="text"><string>Width:</string></property>
+            </widget>
+           </item>
+           <item row="6" column="1">
+            <widget class="QSpinBox" name="streaming_width_spin">
+             <property name="minimum"><number>64</number></property>
+             <property name="maximum"><number>3840</number></property>
+             <property name="value"><number>400</number></property>
+            </widget>
+           </item>
+           <item row="7" column="0">
+            <widget class="QLabel" name="streaming_height_label">
+             <property name="text"><string>Height:</string></property>
+            </widget>
+           </item>
+           <item row="7" column="1">
+            <widget class="QSpinBox" name="streaming_height_spin">
+             <property name="minimum"><number>64</number></property>
+             <property name="maximum"><number>2160</number></property>
+             <property name="value"><number>240</number></property>
+            </widget>
+           </item>
+           <item row="8" column="0">
+            <widget class="QLabel" name="target_ip_label">
+             <property name="text"><string>Target IP:</string></property>
+            </widget>
+           </item>
+           <item row="8" column="1">
+            <widget class="QLineEdit" name="target_ip_edit">
+             <property name="placeholderText"><string>192.168.50.10</string></property>
+            </widget>
+           </item>
+           <item row="9" column="0">
+            <widget class="QLabel" name="target_port_label">
+             <property name="text"><string>Target Port:</string></property>
+            </widget>
+           </item>
+           <item row="9" column="1">
+            <widget class="QSpinBox" name="target_port_spin">
+             <property name="minimum"><number>1</number></property>
+             <property name="maximum"><number>65535</number></property>
+             <property name="value"><number>5000</number></property>
+            </widget>
+           </item>
          </layout>
         </widget>
        </item>
@@ -148,66 +161,79 @@
            </widget>
           </item>
           <item row="3" column="0">
-           <widget class="QLabel" name="streaming_gpu_2_label">
-            <property name="text"><string>GPU Device:</string></property>
-           </widget>
-          </item>
-          <item row="3" column="1">
-           <widget class="QLineEdit" name="streaming_gpu_2_edit">
-            <property name="placeholderText"><string>/dev/dri/renderD128 (empty=default)</string></property>
-           </widget>
-          </item>
-          <item row="4" column="0" colspan="2">
-           <widget class="QCheckBox" name="streaming_custom_res_2_check">
-            <property name="text"><string>Custom Resolution (overrides resolution factor)</string></property>
-           </widget>
-          </item>
-          <item row="5" column="0">
-           <widget class="QLabel" name="streaming_width_2_label">
-            <property name="text"><string>Width:</string></property>
-           </widget>
-          </item>
-          <item row="5" column="1">
-           <widget class="QSpinBox" name="streaming_width_2_spin">
-            <property name="minimum"><number>64</number></property>
-            <property name="maximum"><number>3840</number></property>
-            <property name="value"><number>320</number></property>
-           </widget>
-          </item>
-          <item row="6" column="0">
-           <widget class="QLabel" name="streaming_height_2_label">
-            <property name="text"><string>Height:</string></property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QSpinBox" name="streaming_height_2_spin">
-            <property name="minimum"><number>64</number></property>
-            <property name="maximum"><number>2160</number></property>
-            <property name="value"><number>240</number></property>
-           </widget>
-          </item>
-          <item row="7" column="0">
-           <widget class="QLabel" name="target_ip_2_label">
-            <property name="text"><string>Target IP:</string></property>
-           </widget>
-          </item>
-          <item row="7" column="1">
-           <widget class="QLineEdit" name="target_ip_2_edit">
-            <property name="placeholderText"><string>192.168.50.10</string></property>
-           </widget>
-          </item>
-          <item row="8" column="0">
-           <widget class="QLabel" name="target_port_2_label">
-            <property name="text"><string>Target Port:</string></property>
-           </widget>
-          </item>
-          <item row="8" column="1">
-           <widget class="QSpinBox" name="target_port_2_spin">
-            <property name="minimum"><number>1</number></property>
-            <property name="maximum"><number>65535</number></property>
-            <property name="value"><number>5001</number></property>
-           </widget>
-          </item>
+            <widget class="QLabel" name="streaming_bitrate_2_label">
+             <property name="text"><string>Bitrate (kbps):</string></property>
+            </widget>
+           </item>
+           <item row="3" column="1">
+            <widget class="QSpinBox" name="streaming_bitrate_2_spin">
+             <property name="minimum"><number>100</number></property>
+             <property name="maximum"><number>100000</number></property>
+             <property name="value"><number>4000</number></property>
+             <property name="suffix"><string> kbps</string></property>
+            </widget>
+           </item>
+           <item row="4" column="0">
+            <widget class="QLabel" name="streaming_gpu_2_label">
+             <property name="text"><string>GPU Device:</string></property>
+            </widget>
+           </item>
+           <item row="4" column="1">
+            <widget class="QLineEdit" name="streaming_gpu_2_edit">
+             <property name="placeholderText"><string>/dev/dri/renderD128 (empty=default)</string></property>
+            </widget>
+           </item>
+           <item row="5" column="0" colspan="2">
+            <widget class="QCheckBox" name="streaming_custom_res_2_check">
+             <property name="text"><string>Custom Resolution (overrides resolution factor)</string></property>
+            </widget>
+           </item>
+           <item row="6" column="0">
+            <widget class="QLabel" name="streaming_width_2_label">
+             <property name="text"><string>Width:</string></property>
+            </widget>
+           </item>
+           <item row="6" column="1">
+            <widget class="QSpinBox" name="streaming_width_2_spin">
+             <property name="minimum"><number>64</number></property>
+             <property name="maximum"><number>3840</number></property>
+             <property name="value"><number>320</number></property>
+            </widget>
+           </item>
+           <item row="7" column="0">
+            <widget class="QLabel" name="streaming_height_2_label">
+             <property name="text"><string>Height:</string></property>
+            </widget>
+           </item>
+           <item row="7" column="1">
+            <widget class="QSpinBox" name="streaming_height_2_spin">
+             <property name="minimum"><number>64</number></property>
+             <property name="maximum"><number>2160</number></property>
+             <property name="value"><number>240</number></property>
+            </widget>
+           </item>
+           <item row="8" column="0">
+            <widget class="QLabel" name="target_ip_2_label">
+             <property name="text"><string>Target IP:</string></property>
+            </widget>
+           </item>
+           <item row="8" column="1">
+            <widget class="QLineEdit" name="target_ip_2_edit">
+             <property name="placeholderText"><string>192.168.50.10</string></property>
+            </widget>
+           </item>
+           <item row="9" column="0">
+            <widget class="QLabel" name="target_port_2_label">
+             <property name="text"><string>Target Port:</string></property>
+            </widget>
+           </item>
+           <item row="9" column="1">
+            <widget class="QSpinBox" name="target_port_2_spin">
+             <property name="minimum"><number>1</number></property>
+             <property name="maximum"><number>65535</number></property>
+             <property name="value"><number>5001</number></property>
+            </widget>
+           </item>
          </layout>
         </widget>
        </item>

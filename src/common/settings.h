@@ -637,6 +637,8 @@ struct Values {
     Setting<u32, true> streaming_height{240, 64, 2160, Keys::streaming_height};
     Setting<std::string> streaming_target_ip{std::string("192.168.50.10"), Keys::streaming_target_ip};
     Setting<u16, true> streaming_target_port{5000, 1, 65535, Keys::streaming_target_port};
+    Setting<u32, true> streaming_bitrate{4000, 100, 100000, Keys::streaming_bitrate};
+    Setting<u32, true> streaming_qp{22, 1, 51, Keys::streaming_qp};
 
     Setting<bool> streaming_enabled_2{false, Keys::streaming_enabled_2};
     Setting<StreamingScreen> streaming_screen_2{StreamingScreen::Bottom, Keys::streaming_screen_2};
@@ -647,6 +649,8 @@ struct Values {
     Setting<u32, true> streaming_height_2{240, 64, 2160, Keys::streaming_height_2};
     Setting<std::string> streaming_target_ip_2{std::string("192.168.50.10"), Keys::streaming_target_ip_2};
     Setting<u16, true> streaming_target_port_2{5001, 1, 65535, Keys::streaming_target_port_2};
+    Setting<u32, true> streaming_bitrate_2{4000, 100, 100000, Keys::streaming_bitrate_2};
+    Setting<u32, true> streaming_qp_2{22, 1, 51, Keys::streaming_qp_2};
 
     Setting<u32> cardboard_screen_size{85, Keys::cardboard_screen_size};
     Setting<s32> cardboard_x_shift{0, Keys::cardboard_x_shift};

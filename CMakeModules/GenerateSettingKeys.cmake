@@ -153,6 +153,8 @@ foreach(KEY IN ITEMS
     "streaming_height"
     "streaming_target_ip"
     "streaming_target_port"
+    "streaming_bitrate"
+    "streaming_qp"
     "streaming_enabled_2"
     "streaming_screen_2"
     "streaming_encoder_2"
@@ -162,6 +164,8 @@ foreach(KEY IN ITEMS
     "streaming_height_2"
     "streaming_target_ip_2"
     "streaming_target_port_2"
+    "streaming_bitrate_2"
+    "streaming_qp_2"
     "record_frame_times"
     "language" # FIXME: DUPLICATE KEY (libretro equivalent: language_value)
     "web_api_url"

@@ -169,6 +169,8 @@ private:
         bool prev_enabled = false;
         std::string prev_ip;
         u16 prev_port = 0;
+        u32 prev_bitrate = 0;
+        u32 prev_qp = 22;
         Settings::StreamingScreen prev_screen = Settings::StreamingScreen::Bottom;
     };
     std::array<StreamState, NUM_STREAMS> streams;

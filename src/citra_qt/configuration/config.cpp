@@ -707,6 +707,7 @@ void QtConfig::ReadRendererValues() {
     qt_config->beginGroup(QStringLiteral("Renderer"));
 
     ReadGlobalSetting(Settings::values.graphics_api);
+    Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan; // Vulkan-only build
     ReadGlobalSetting(Settings::values.physical_device);
     ReadGlobalSetting(Settings::values.spirv_shader_gen);
     ReadGlobalSetting(Settings::values.disable_spirv_optimizer);
@@ -1306,6 +1307,7 @@ void QtConfig::SavePathValues() {
 void QtConfig::SaveRendererValues() {
     qt_config->beginGroup(QStringLiteral("Renderer"));
 
+    Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan; // Vulkan-only build
     WriteGlobalSetting(Settings::values.graphics_api);
     WriteGlobalSetting(Settings::values.physical_device);
     WriteGlobalSetting(Settings::values.spirv_shader_gen);

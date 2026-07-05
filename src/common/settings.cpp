@@ -266,13 +266,7 @@ void RestoreGlobalState(bool is_powered_on) {
 
 /// Gets the graphics API that should be used; not necessarily one set in settings
 Settings::GraphicsAPI GetWorkingGraphicsAPI() {
-    auto graphics_api = Settings::values.graphics_api.GetValue();
-#if defined(ANDROID) && !defined(HAVE_LIBRETRO)
-    if (AndroidUtils::IsUsingAngleForOpenGL()) {
-        graphics_api = Settings::GraphicsAPI::Vulkan;
-    }
-#endif
-    return graphics_api;
+    return Settings::GraphicsAPI::Vulkan; // Vulkan-only build
 }
 
 void LoadProfile(int index) {

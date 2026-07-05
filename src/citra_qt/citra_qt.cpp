@@ -3761,45 +3761,21 @@ void GMainWindow::UpdateVolumeUI() {
 }
 
 void GMainWindow::UpdateAPIIndicator(bool update) {
+    // Vulkan-only build: always show Vulkan, never cycle
+    Settings::values.graphics_api = Settings::GraphicsAPI::Vulkan;
+    const u32 api_index = static_cast<u32>(Settings::GraphicsAPI::Vulkan);
+
     static std::array graphics_apis = {QStringLiteral("SOFTWARE"), QStringLiteral("OPENGL"),
                                        QStringLiteral("VULKAN")};
-
     static std::array graphics_api_colors = {QStringLiteral("#3ae400"), QStringLiteral("#00ccdd"),
                                              QStringLiteral("#91242a")};
-
-    u32 api_index = static_cast<u32>(Settings::values.graphics_api.GetValue());
-    if (update) {
-        api_index = (api_index + 1) % graphics_apis.size();
-        // Skip past any disabled renderers.
-#ifndef ENABLE_SOFTWARE_RENDERER
-        if (api_index == static_cast<u32>(Settings::GraphicsAPI::Software)) {
-            api_index = (api_index + 1) % graphics_apis.size();
-        }
-#endif
-#ifndef ENABLE_OPENGL
-        if (api_index == static_cast<u32>(Settings::GraphicsAPI::OpenGL)) {
-            api_index = (api_index + 1) % graphics_apis.size();
-        }
-#endif
-#ifndef ENABLE_VULKAN
-        if (api_index == static_cast<u32>(Settings::GraphicsAPI::Vulkan)) {
-            api_index = (api_index + 1) % graphics_apis.size();
-        }
-#else
-        if (physical_devices.empty()) {
-            if (api_index == static_cast<u32>(Settings::GraphicsAPI::Vulkan)) {
-                api_index = (api_index + 1) % graphics_apis.size();
-            }
-        }
-#endif
-        Settings::values.graphics_api = static_cast<Settings::GraphicsAPI>(api_index);
-    }
 
     const QString style_sheet = QStringLiteral("QPushButton { font-weight: bold; color: %0; }")
                                     .arg(graphics_api_colors[api_index]);
 
     graphics_api_button->setText(graphics_apis[api_index]);
     graphics_api_button->setStyleSheet(style_sheet);
+    graphics_api_button->setEnabled(false);
 }
 
 void GMainWindow::UpdateStatusButtons() {

@@ -143,14 +143,15 @@ RendererVulkan::~RendererVulkan() {
     device.waitIdle();
 
 #ifdef HAVE_GSTREAMER
-    frame_streamer.reset();
-    rasterizer.SetFrameStreamer(nullptr);
-    if (streaming_frame.image_view) {
-        device.destroyImageView(streaming_frame.image_view);
-    }
-    if (streaming_frame.image) {
-        vmaDestroyImage(instance.GetAllocator(), streaming_frame.image,
-                        streaming_frame.allocation);
+    for (auto& s : streams) {
+        s.frame_streamer.reset();
+        if (s.streaming_frame.image_view) {
+            device.destroyImageView(s.streaming_frame.image_view);
+        }
+        if (s.streaming_frame.image) {
+            vmaDestroyImage(instance.GetAllocator(), s.streaming_frame.image,
+                            s.streaming_frame.allocation);
+        }
     }
 #endif
 
@@ -1133,14 +1134,21 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
     });
 }
 
-void RendererVulkan::UpdateStreaming() {
+void RendererVulkan::UpdateStream(u32 index) {
 #ifdef HAVE_GSTREAMER
-    const bool enabled = Settings::values.streaming_enabled.GetValue();
-    const auto screen = Settings::values.streaming_screen.GetValue();
+    const bool is_second = (index == 1);
+    const bool enabled = is_second ? Settings::values.streaming_enabled_2.GetValue()
+                                   : Settings::values.streaming_enabled.GetValue();
+    const auto screen = is_second ? Settings::values.streaming_screen_2.GetValue()
+                                  : Settings::values.streaming_screen.GetValue();
     u32 target_w, target_h;
-    if (Settings::values.streaming_custom_resolution.GetValue()) {
-        target_w = Settings::values.streaming_width.GetValue();
-        target_h = Settings::values.streaming_height.GetValue();
+    const bool custom_res = is_second ? Settings::values.streaming_custom_resolution_2.GetValue()
+                                      : Settings::values.streaming_custom_resolution.GetValue();
+    if (custom_res) {
+        target_w = is_second ? Settings::values.streaming_width_2.GetValue()
+                             : Settings::values.streaming_width.GetValue();
+        target_h = is_second ? Settings::values.streaming_height_2.GetValue()
+                             : Settings::values.streaming_height.GetValue();
     } else {
         u32 scale = Settings::values.resolution_factor.GetValue();
         if (scale == 0) scale = 1;
@@ -1152,48 +1160,55 @@ void RendererVulkan::UpdateStreaming() {
         target_h = screen_height * scale;
     }
 
-    const auto& target_ip = Settings::values.streaming_target_ip.GetValue();
-    const auto target_port = static_cast<u16>(Settings::values.streaming_target_port.GetValue());
+    const auto& target_ip = is_second ? Settings::values.streaming_target_ip_2.GetValue()
+                                      : Settings::values.streaming_target_ip.GetValue();
+    const auto target_port = static_cast<u16>(
+        is_second ? Settings::values.streaming_target_port_2.GetValue()
+                  : Settings::values.streaming_target_port.GetValue());
 
-    LOG_INFO(Render_Vulkan, "UpdateStreaming: enabled={} screen={} target={}:{}",
-             enabled, static_cast<int>(screen), target_ip, target_port);
+    auto& s = streams[index];
+    auto& fs = s.frame_streamer;
 
-    // Detect if settings changed and streaming texture needs recreation
-    const bool size_changed = frame_streamer &&
-        (frame_streamer->GetWidth() != target_w || frame_streamer->GetHeight() != target_h);
-    const bool endpoint_changed = target_ip != prev_streaming_ip ||
-                                   target_port != prev_streaming_port;
-    const bool layout_changed = screen != prev_streaming_screen;
-    const bool needs_recreate = !frame_streamer || size_changed || endpoint_changed ||
-                                layout_changed || prev_streaming_enabled != enabled;
+    const bool size_changed = fs &&
+        (fs->GetWidth() != target_w || fs->GetHeight() != target_h);
+    const bool endpoint_changed = target_ip != s.prev_ip || target_port != s.prev_port;
+    const bool layout_changed = screen != s.prev_screen;
+    const bool needs_recreate = !fs || size_changed || endpoint_changed ||
+                                layout_changed || s.prev_enabled != enabled;
 
     if (!enabled) {
-        if (frame_streamer) {
+        if (fs) {
             scheduler.Finish();
-            frame_streamer->Stop();
-            rasterizer.SetFrameStreamer(nullptr);
-            frame_streamer.reset();
-            prev_streaming_enabled = false;
-            LOG_INFO(Render_Vulkan, "Streaming disabled.");
+            fs->Stop();
+            fs.reset();
+            s.prev_enabled = false;
+            LOG_INFO(Render_Vulkan, "Stream {} disabled.", index);
         }
         return;
     }
 
-    // Enable or recreate if needed
     if (needs_recreate) {
-        if (frame_streamer) {
+        if (fs) {
             scheduler.Finish();
-            frame_streamer->Stop();
-            rasterizer.SetFrameStreamer(nullptr);
-            frame_streamer.reset();
+            fs->Stop();
+            fs.reset();
         }
-        frame_streamer = std::make_unique<FrameStreamer>(instance, target_w, target_h);
-        rasterizer.SetFrameStreamer(frame_streamer.get());
-        frame_streamer->Start(target_ip, target_port);
-        prev_streaming_enabled = enabled;
-        prev_streaming_ip = target_ip;
-        prev_streaming_port = target_port;
-        prev_streaming_screen = screen;
+        fs = std::make_unique<FrameStreamer>(instance, target_w, target_h);
+        fs->Start(target_ip, target_port);
+        s.prev_enabled = enabled;
+        s.prev_ip = target_ip;
+        s.prev_port = target_port;
+        s.prev_screen = screen;
+        LOG_INFO(Render_Vulkan, "Stream {} created ({}x{}), active={}.",
+                 index, target_w, target_h, fs->IsActive());
+    }
+#endif
+}
+
+void RendererVulkan::UpdateStreaming() {
+#ifdef HAVE_GSTREAMER
+    for (u32 i = 0; i < NUM_STREAMS; i++) {
+        UpdateStream(i);
     }
 #endif
 }
@@ -1255,26 +1270,45 @@ void RendererVulkan::SwapBuffers() {
     }
 
 #ifdef HAVE_GSTREAMER
-    if (frame_streamer && frame_streamer->IsActive()) {
-        const auto screen = Settings::values.streaming_screen.GetValue();
-        const u32 stream_w = frame_streamer->GetWidth();
-        const u32 stream_h = frame_streamer->GetHeight();
-        if (streaming_frame_w != stream_w || streaming_frame_h != stream_h) {
-            main_present_window.RecreateFrame(&streaming_frame, stream_w, stream_h);
-            streaming_frame_w = stream_w;
-            streaming_frame_h = stream_h;
+    for (u32 i = 0; i < NUM_STREAMS; i++) {
+        auto& s = streams[i];
+        if (s.frame_streamer && s.frame_streamer->IsActive()) {
+            const auto screen = (i == 1) ? Settings::values.streaming_screen_2.GetValue()
+                                         : Settings::values.streaming_screen.GetValue();
+            const u32 stream_w = s.frame_streamer->GetWidth();
+            const u32 stream_h = s.frame_streamer->GetHeight();
+            if (s.frame_w != stream_w || s.frame_h != stream_h) {
+                main_present_window.RecreateFrame(&s.streaming_frame, stream_w, stream_h);
+                s.frame_w = stream_w;
+                s.frame_h = stream_h;
+            }
+            const bool is_swapped = (screen == Settings::StreamingScreen::Bottom);
+            const auto stream_layout =
+                Layout::SingleFrameLayout(stream_w, stream_h, is_swapped, false);
+            DrawScreens(&s.streaming_frame, stream_layout, false);
+            auto* streamer = s.frame_streamer.get();
+            scheduler.Record([streamer, source = s.streaming_frame.image,
+                              sw = stream_w, sh = stream_h](vk::CommandBuffer cmdbuf) {
+                streamer->RecordBlit(cmdbuf, source, sw, sh);
+            });
         }
-        const bool is_swapped = (screen == Settings::StreamingScreen::Bottom);
-        const auto stream_layout =
-            Layout::SingleFrameLayout(stream_w, stream_h, is_swapped, false);
-        DrawScreens(&streaming_frame, stream_layout, false);
-        auto* streamer = frame_streamer.get();
-        scheduler.Record([streamer, source = streaming_frame.image,
-                          sw = stream_w, sh = stream_h](vk::CommandBuffer cmdbuf) {
-            streamer->RecordBlit(cmdbuf, source, sw, sh);
-        });
-        scheduler.Finish();
-        frame_streamer->PushFrame();
+    }
+    {
+        bool any_active = false;
+        for (u32 i = 0; i < NUM_STREAMS; i++) {
+            if (streams[i].frame_streamer && streams[i].frame_streamer->IsActive()) {
+                any_active = true;
+                break;
+            }
+        }
+        if (any_active) {
+            scheduler.Finish();
+            for (u32 i = 0; i < NUM_STREAMS; i++) {
+                if (streams[i].frame_streamer && streams[i].frame_streamer->IsActive()) {
+                    streams[i].frame_streamer->PushFrame();
+                }
+            }
+        }
     }
 #endif
 

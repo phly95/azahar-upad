@@ -46,9 +46,6 @@ public:
 
     void TickFrame();
 
-    void SetFrameStreamer(class FrameStreamer* streamer) {
-        frame_streamer = streamer;
-    }
     void LoadDefaultDiskResources(const std::atomic_bool& stop_loading,
                                   const VideoCore::DiskResourceLoadCallback& callback) override;
 
@@ -145,7 +142,6 @@ private:
     u32 uniform_size_aligned_vs;
     u32 uniform_size_aligned_fs;
     bool async_shaders{false};
-    class FrameStreamer* frame_streamer = nullptr;
 };
 
 } // namespace Vulkan

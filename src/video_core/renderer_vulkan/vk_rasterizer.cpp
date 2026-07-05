@@ -18,10 +18,6 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture/texture_decode.h"
 
-#ifdef HAVE_GSTREAMER
-#include "video_core/renderer_vulkan/vk_frame_streamer.h"
-#endif
-
 namespace Vulkan {
 
 namespace {

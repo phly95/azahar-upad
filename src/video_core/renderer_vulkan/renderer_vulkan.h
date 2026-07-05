@@ -159,14 +159,19 @@ private:
     bool secondaryWindowEnabled;
     bool screenRendered;
 #ifdef HAVE_GSTREAMER
-    std::unique_ptr<FrameStreamer> frame_streamer;
-    bool prev_streaming_enabled = false;
-    std::string prev_streaming_ip;
-    u16 prev_streaming_port = 0;
-    Settings::StreamingScreen prev_streaming_screen = Settings::StreamingScreen::Bottom;
-    Frame streaming_frame{};
-    u32 streaming_frame_w = 0;
-    u32 streaming_frame_h = 0;
+    void UpdateStream(u32 index);
+    static constexpr u32 NUM_STREAMS = 2;
+    struct StreamState {
+        std::unique_ptr<FrameStreamer> frame_streamer;
+        Frame streaming_frame{};
+        u32 frame_w = 0;
+        u32 frame_h = 0;
+        bool prev_enabled = false;
+        std::string prev_ip;
+        u16 prev_port = 0;
+        Settings::StreamingScreen prev_screen = Settings::StreamingScreen::Bottom;
+    };
+    std::array<StreamState, NUM_STREAMS> streams;
 #endif
 };
 

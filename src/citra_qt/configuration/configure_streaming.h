@@ -11,8 +11,9 @@ namespace Ui {
 class ConfigureStreaming;
 }
 
-class ConfigureStreaming : public QWidget {
+class ConfigureStreaming final : public QWidget {
     Q_OBJECT
+
 public:
     explicit ConfigureStreaming(QWidget* parent = nullptr);
     ~ConfigureStreaming() override;
@@ -22,8 +23,7 @@ public:
     void SetConfiguration();
 
 private:
-    void UpdateCustomResolutionEnabled();
+    void UpdateCustomResEnabled();
 
-private:
     std::unique_ptr<Ui::ConfigureStreaming> ui;
 };

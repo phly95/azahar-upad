@@ -638,6 +638,16 @@ struct Values {
     Setting<std::string> streaming_target_ip{std::string("192.168.50.10"), Keys::streaming_target_ip};
     Setting<u16, true> streaming_target_port{5000, 1, 65535, Keys::streaming_target_port};
 
+    Setting<bool> streaming_enabled_2{false, Keys::streaming_enabled_2};
+    Setting<StreamingScreen> streaming_screen_2{StreamingScreen::Bottom, Keys::streaming_screen_2};
+    Setting<StreamingEncoder> streaming_encoder_2{StreamingEncoder::Auto, Keys::streaming_encoder_2};
+    Setting<std::string> streaming_gpu_device_2{std::string(""), Keys::streaming_gpu_device_2};
+    Setting<bool> streaming_custom_resolution_2{false, Keys::streaming_custom_resolution_2};
+    Setting<u32, true> streaming_width_2{320, 64, 3840, Keys::streaming_width_2};
+    Setting<u32, true> streaming_height_2{240, 64, 2160, Keys::streaming_height_2};
+    Setting<std::string> streaming_target_ip_2{std::string("192.168.50.10"), Keys::streaming_target_ip_2};
+    Setting<u16, true> streaming_target_port_2{5001, 1, 65535, Keys::streaming_target_port_2};
+
     Setting<u32> cardboard_screen_size{85, Keys::cardboard_screen_size};
     Setting<s32> cardboard_x_shift{0, Keys::cardboard_x_shift};
     Setting<s32> cardboard_y_shift{0, Keys::cardboard_y_shift};

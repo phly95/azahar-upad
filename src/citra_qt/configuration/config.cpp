@@ -852,6 +852,27 @@ void QtConfig::ReadStreamingValues() {
                      Settings::values.streaming_target_port.GetDefault())
             .toInt());
 
+    ReadBasicSetting(Settings::values.streaming_enabled_2);
+    ReadBasicSetting(Settings::values.streaming_screen_2);
+    ReadBasicSetting(Settings::values.streaming_encoder_2);
+    Settings::values.streaming_gpu_device_2 =
+        ReadSetting(Settings::QKeys::streaming_gpu_device_2,
+                     QString::fromStdString(Settings::values.streaming_gpu_device_2.GetDefault()))
+            .toString()
+            .toStdString();
+    ReadBasicSetting(Settings::values.streaming_custom_resolution_2);
+    ReadBasicSetting(Settings::values.streaming_width_2);
+    ReadBasicSetting(Settings::values.streaming_height_2);
+    Settings::values.streaming_target_ip_2 =
+        ReadSetting(Settings::QKeys::streaming_target_ip_2,
+                     QString::fromStdString(Settings::values.streaming_target_ip_2.GetDefault()))
+            .toString()
+            .toStdString();
+    Settings::values.streaming_target_port_2 = static_cast<u16>(
+        ReadSetting(Settings::QKeys::streaming_target_port_2,
+                     Settings::values.streaming_target_port_2.GetDefault())
+            .toInt());
+
     qt_config->endGroup();
 }
 
@@ -1410,6 +1431,22 @@ void QtConfig::SaveStreamingValues() {
     WriteSetting(Settings::QKeys::streaming_target_port,
                  static_cast<int>(Settings::values.streaming_target_port.GetValue()),
                  Settings::values.streaming_target_port.GetDefault());
+
+    WriteBasicSetting(Settings::values.streaming_enabled_2);
+    WriteBasicSetting(Settings::values.streaming_screen_2);
+    WriteBasicSetting(Settings::values.streaming_encoder_2);
+    WriteSetting(Settings::QKeys::streaming_gpu_device_2,
+                 QString::fromStdString(Settings::values.streaming_gpu_device_2.GetValue()),
+                 QString::fromStdString(Settings::values.streaming_gpu_device_2.GetDefault()));
+    WriteBasicSetting(Settings::values.streaming_custom_resolution_2);
+    WriteBasicSetting(Settings::values.streaming_width_2);
+    WriteBasicSetting(Settings::values.streaming_height_2);
+    WriteSetting(Settings::QKeys::streaming_target_ip_2,
+                 QString::fromStdString(Settings::values.streaming_target_ip_2.GetValue()),
+                 QString::fromStdString(Settings::values.streaming_target_ip_2.GetDefault()));
+    WriteSetting(Settings::QKeys::streaming_target_port_2,
+                 static_cast<int>(Settings::values.streaming_target_port_2.GetValue()),
+                 Settings::values.streaming_target_port_2.GetDefault());
 
     qt_config->endGroup();
 }

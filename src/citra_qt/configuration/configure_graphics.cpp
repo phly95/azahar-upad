@@ -34,19 +34,13 @@ ConfigureGraphics::ConfigureGraphics(QString gl_renderer, std::span<const QStrin
 
     auto graphics_api_combo_model =
         qobject_cast<QStandardItemModel*>(ui->graphics_api_combo->model());
-#ifndef ENABLE_SOFTWARE_RENDERER
     const auto software_item =
         graphics_api_combo_model->item(static_cast<u32>(Settings::GraphicsAPI::Software));
     software_item->setFlags(software_item->flags() & ~Qt::ItemIsEnabled);
-#endif
 
-#ifndef ENABLE_OPENGL
     const auto opengl_item =
         graphics_api_combo_model->item(static_cast<u32>(Settings::GraphicsAPI::OpenGL));
     opengl_item->setFlags(opengl_item->flags() & ~Qt::ItemIsEnabled);
-#else
-    ui->opengl_renderer_name_label->setText(gl_renderer);
-#endif
 
 #ifndef ENABLE_VULKAN
     const auto vulkan_item =

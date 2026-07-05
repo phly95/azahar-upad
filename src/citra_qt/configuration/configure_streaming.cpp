@@ -16,6 +16,8 @@ ConfigureStreaming::~ConfigureStreaming() = default;
 
 void ConfigureStreaming::SetConfiguration() {
     ui->streaming_enabled_check->setChecked(Settings::values.streaming_enabled.GetValue());
+    ui->streaming_screen_combo->setCurrentIndex(
+        static_cast<int>(Settings::values.streaming_screen.GetValue()));
     ui->target_ip_edit->setText(
         QString::fromStdString(Settings::values.streaming_target_ip.GetValue()));
     ui->target_port_spin->setValue(
@@ -24,6 +26,8 @@ void ConfigureStreaming::SetConfiguration() {
 
 void ConfigureStreaming::ApplyConfiguration() {
     Settings::values.streaming_enabled = ui->streaming_enabled_check->isChecked();
+    Settings::values.streaming_screen =
+        static_cast<Settings::StreamingScreen>(ui->streaming_screen_combo->currentIndex());
     Settings::values.streaming_target_ip = ui->target_ip_edit->text().toStdString();
     Settings::values.streaming_target_port =
         static_cast<u16>(ui->target_port_spin->value());

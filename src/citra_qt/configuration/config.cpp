@@ -832,6 +832,7 @@ void QtConfig::ReadStreamingValues() {
     qt_config->beginGroup(QStringLiteral("Streaming"));
 
     ReadBasicSetting(Settings::values.streaming_enabled);
+    ReadBasicSetting(Settings::values.streaming_screen);
     Settings::values.streaming_target_ip =
         ReadSetting(Settings::QKeys::streaming_target_ip,
                      QString::fromStdString(Settings::values.streaming_target_ip.GetDefault()))
@@ -1386,6 +1387,7 @@ void QtConfig::SaveStreamingValues() {
     qt_config->beginGroup(QStringLiteral("Streaming"));
 
     WriteBasicSetting(Settings::values.streaming_enabled);
+    WriteBasicSetting(Settings::values.streaming_screen);
     WriteSetting(Settings::QKeys::streaming_target_ip,
                  QString::fromStdString(Settings::values.streaming_target_ip.GetValue()),
                  QString::fromStdString(Settings::values.streaming_target_ip.GetDefault()));

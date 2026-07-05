@@ -163,7 +163,7 @@ private:
     bool prev_streaming_enabled = false;
     std::string prev_streaming_ip;
     u16 prev_streaming_port = 0;
-    bool prev_swap_screen = false;
+    Settings::StreamingScreen prev_streaming_screen = Settings::StreamingScreen::Bottom;
 #endif
 };
 

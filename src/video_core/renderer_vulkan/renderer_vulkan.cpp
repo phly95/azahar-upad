@@ -1128,10 +1128,12 @@ void RendererVulkan::DrawCursor(const Layout::FramebufferLayout& layout) {
 void RendererVulkan::UpdateStreaming() {
 #ifdef HAVE_GSTREAMER
     const bool enabled = Settings::values.streaming_enabled.GetValue();
+    const auto screen = Settings::values.streaming_screen.GetValue();
     u32 scale = Settings::values.resolution_factor.GetValue();
     if (scale == 0) scale = 1;
-    const bool swapped = Settings::values.swap_screen.GetValue();
-    const u32 screen_width = swapped ? Core::kScreenTopWidth : Core::kScreenBottomWidth;
+    const u32 screen_width = (screen == Settings::StreamingScreen::Top)
+                                 ? Core::kScreenTopWidth
+                                 : Core::kScreenBottomWidth;
     const u32 screen_height = Core::kScreenTopHeight;
     const u32 target_w = screen_width * scale;
     const u32 target_h = screen_height * scale;
@@ -1139,12 +1141,15 @@ void RendererVulkan::UpdateStreaming() {
     const auto& target_ip = Settings::values.streaming_target_ip.GetValue();
     const auto target_port = static_cast<u16>(Settings::values.streaming_target_port.GetValue());
 
+    LOG_INFO(Render_Vulkan, "UpdateStreaming: enabled={} screen={} target={}:{}",
+             enabled, static_cast<int>(screen), target_ip, target_port);
+
     // Detect if settings changed and streaming texture needs recreation
     const bool size_changed = frame_streamer &&
         (frame_streamer->GetWidth() != target_w || frame_streamer->GetHeight() != target_h);
     const bool endpoint_changed = target_ip != prev_streaming_ip ||
-                                  target_port != prev_streaming_port;
-    const bool layout_changed = swapped != prev_swap_screen;
+                                   target_port != prev_streaming_port;
+    const bool layout_changed = screen != prev_streaming_screen;
     const bool needs_recreate = !frame_streamer || size_changed || endpoint_changed ||
                                 layout_changed || prev_streaming_enabled != enabled;
 
@@ -1174,7 +1179,7 @@ void RendererVulkan::UpdateStreaming() {
         prev_streaming_enabled = enabled;
         prev_streaming_ip = target_ip;
         prev_streaming_port = target_port;
-        prev_swap_screen = swapped;
+        prev_streaming_screen = screen;
     }
 #endif
 }

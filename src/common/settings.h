@@ -136,6 +136,11 @@ enum class AspectRatio : u32 {
     Stretch = 5,
 };
 
+enum class StreamingScreen : u32 {
+    Top = 0,
+    Bottom = 1,
+};
+
 namespace NativeButton {
 
 enum Values {
@@ -616,6 +621,7 @@ struct Values {
                                                            Keys::mono_render_option};
 
     Setting<bool> streaming_enabled{false, Keys::streaming_enabled};
+    Setting<StreamingScreen> streaming_screen{StreamingScreen::Bottom, Keys::streaming_screen};
     Setting<std::string> streaming_target_ip{std::string("192.168.50.10"), Keys::streaming_target_ip};
     Setting<u16, true> streaming_target_port{5000, 1, 65535, Keys::streaming_target_port};
 

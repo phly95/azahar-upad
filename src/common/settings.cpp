@@ -128,6 +128,7 @@ void LogSettings() {
     log_setting("Layout_SwapScreen", values.swap_screen.GetValue());
     log_setting("Layout_UprightScreen", values.upright_screen.GetValue());
     log_setting("Streaming_Enabled", values.streaming_enabled.GetValue());
+    log_setting("Streaming_Screen", static_cast<int>(values.streaming_screen.GetValue()));
     log_setting("Streaming_TargetIP", values.streaming_target_ip.GetValue());
     log_setting("Streaming_TargetPort", values.streaming_target_port.GetValue());
     log_setting("Layout_ScreenGap", values.screen_gap.GetValue());

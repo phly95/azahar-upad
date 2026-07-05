@@ -355,13 +355,8 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
     }
 
     std::string enc_desc;
-    GstElement* test_encoder = gst_element_factory_make("vaapih264enc", nullptr);
-    if (test_encoder) {
-        gst_object_unref(test_encoder);
-        enc_desc = "vaapih264enc rate-control=cqp quant-i=22 quant-p=23";
-    } else {
-        enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
-    }
+    enc_desc = "x264enc tune=zerolatency speed-preset=ultrafast key-int-max=30 bitrate=400";
+    LOG_INFO(Render_Vulkan, "FrameStreamer: Using x264enc");
 
     std::string pipeline_desc = "appsrc name=src is-live=true format=3 "
                                 "! videoconvert ! " +
@@ -370,6 +365,8 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
                                 "! rtph264pay config-interval=1 pt=96 "
                                 "! udpsink host=" +
                                 target_ip + " port=" + std::to_string(target_port);
+
+    LOG_INFO(Render_Vulkan, "FrameStreamer: Pipeline: {}", pipeline_desc);
 
     GError* error = nullptr;
     pipeline = gst_parse_launch(pipeline_desc.c_str(), &error);
@@ -391,7 +388,6 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
     GstVideoInfo vinfo;
     gst_video_info_set_format(&vinfo, GST_VIDEO_FORMAT_RGBA, width, height);
     GstCaps* caps = gst_video_info_to_caps(&vinfo);
-    gst_caps_set_features(caps, 0, gst_caps_features_new("memory:DMABuf", NULL));
     g_object_set(appsrc, "caps", caps, NULL);
     gst_caps_unref(caps);
 
@@ -401,7 +397,7 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
 
     GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     if (ret == GST_STATE_CHANGE_FAILURE) {
-        LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to start pipeline.");
+        LOG_ERROR(Render_Vulkan, "FrameStreamer: Failed to start pipeline (ret={}).", ret);
         gst_object_unref(appsrc);
         appsrc = nullptr;
         gst_object_unref(pipeline);
@@ -409,7 +405,7 @@ void FrameStreamer::InitGstPipeline(const std::string& target_ip, u16 target_por
         return;
     }
 
-    LOG_INFO(Render_Vulkan, "FrameStreamer: GStreamer pipeline started successfully.");
+    LOG_INFO(Render_Vulkan, "FrameStreamer: GStreamer pipeline started successfully (ret={}).", ret);
 }
 
 void FrameStreamer::CleanupGstPipeline() {

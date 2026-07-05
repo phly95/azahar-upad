@@ -145,6 +145,7 @@ foreach(KEY IN ITEMS
     "udp_input_port"
     "udp_pad_index"
     "streaming_enabled"
+    "streaming_screen"
     "streaming_target_ip"
     "streaming_target_port"
     "record_frame_times"

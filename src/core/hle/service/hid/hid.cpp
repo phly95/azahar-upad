@@ -10,6 +10,7 @@
 #include <boost/serialization/unique_ptr.hpp>
 #include "common/archives.h"
 #include "common/logging/log.h"
+#include "common/param_package.h"
 #include "core/3ds.h"
 #include "core/core.h"
 #include "core/hle/ipc_helpers.h"
@@ -138,6 +139,16 @@ void Module::LoadInputDevices() {
         touch_btn_device = Input::CreateDevice<Input::TouchDevice>("engine:touch_from_button");
     } else {
         touch_btn_device.reset();
+    }
+    if (Settings::values.streaming_input_enabled.GetValue()) {
+        Common::ParamPackage params;
+        params.Set("engine", "network_touch");
+        params.Set("port", static_cast<int>(Settings::values.streaming_input_port.GetValue()));
+        network_touch_device = Input::CreateDevice<Input::TouchDevice>(params.Serialize());
+        LOG_INFO(Service_HID, "Network touch input enabled on UDP port {}",
+                 Settings::values.streaming_input_port.GetValue());
+    } else {
+        network_touch_device.reset();
     }
 }
 
@@ -288,6 +299,9 @@ void Module::UpdatePadCallback(std::uintptr_t user_data, s64 cycles_late) {
         }
         if (!pressed && controller_touch_device) {
             std::tie(x, y, pressed) = controller_touch_device->GetStatus();
+        }
+        if (!pressed && network_touch_device) {
+            std::tie(x, y, pressed) = network_touch_device->GetStatus();
         }
         touch_entry.x = static_cast<u16>(x * Core::kScreenBottomWidth);
         touch_entry.y = static_cast<u16>(y * Core::kScreenBottomHeight);

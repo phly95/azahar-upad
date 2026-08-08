@@ -145,6 +145,8 @@ void LogSettings() {
     log_setting("Streaming2_TargetPort", values.streaming_target_port_2.GetValue());
     log_setting("Streaming2_Bitrate", values.streaming_bitrate_2.GetValue());
     log_setting("Streaming2_QP", values.streaming_qp_2.GetValue());
+    log_setting("Streaming_InputEnabled", values.streaming_input_enabled.GetValue());
+    log_setting("Streaming_InputPort", values.streaming_input_port.GetValue());
     log_setting("Layout_ScreenGap", values.screen_gap.GetValue());
     log_setting("Layout_LargeScreenProportion", values.large_screen_proportion.GetValue());
     log_setting("Layout_SmallScreenPosition", values.small_screen_position.GetValue());

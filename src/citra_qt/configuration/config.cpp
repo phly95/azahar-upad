@@ -854,6 +854,8 @@ void QtConfig::ReadStreamingValues() {
             .toInt());
     ReadBasicSetting(Settings::values.streaming_bitrate);
     ReadBasicSetting(Settings::values.streaming_qp);
+    ReadBasicSetting(Settings::values.streaming_input_enabled);
+    ReadBasicSetting(Settings::values.streaming_input_port);
 
     ReadBasicSetting(Settings::values.streaming_enabled_2);
     ReadBasicSetting(Settings::values.streaming_screen_2);
@@ -1439,6 +1441,8 @@ void QtConfig::SaveStreamingValues() {
                  Settings::values.streaming_target_port.GetDefault());
     WriteBasicSetting(Settings::values.streaming_bitrate);
     WriteBasicSetting(Settings::values.streaming_qp);
+    WriteBasicSetting(Settings::values.streaming_input_enabled);
+    WriteBasicSetting(Settings::values.streaming_input_port);
 
     WriteBasicSetting(Settings::values.streaming_enabled_2);
     WriteBasicSetting(Settings::values.streaming_screen_2);

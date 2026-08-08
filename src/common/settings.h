@@ -652,6 +652,9 @@ struct Values {
     Setting<u32, true> streaming_bitrate_2{4000, 100, 100000, Keys::streaming_bitrate_2};
     Setting<u32, true> streaming_qp_2{22, 1, 51, Keys::streaming_qp_2};
 
+    Setting<bool> streaming_input_enabled{false, Keys::streaming_input_enabled};
+    Setting<u16, true> streaming_input_port{5002, 1, 65535, Keys::streaming_input_port};
+
     Setting<u32> cardboard_screen_size{85, Keys::cardboard_screen_size};
     Setting<s32> cardboard_x_shift{0, Keys::cardboard_x_shift};
     Setting<s32> cardboard_y_shift{0, Keys::cardboard_y_shift};

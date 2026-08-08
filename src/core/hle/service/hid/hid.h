@@ -393,6 +393,7 @@ private:
     std::unique_ptr<Input::TouchDevice> controller_touch_device;
     std::unique_ptr<Input::TouchDevice> touch_device;
     std::unique_ptr<Input::TouchDevice> touch_btn_device;
+    std::unique_ptr<Input::TouchDevice> network_touch_device;
 
     std::shared_ptr<ArticBaseController> artic_controller;
     std::shared_ptr<Network::ArticBase::Client> artic_client;

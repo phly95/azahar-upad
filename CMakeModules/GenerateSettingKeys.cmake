@@ -166,6 +166,8 @@ foreach(KEY IN ITEMS
     "streaming_target_port_2"
     "streaming_bitrate_2"
     "streaming_qp_2"
+    "streaming_input_enabled"
+    "streaming_input_port"
     "record_frame_times"
     "language" # FIXME: DUPLICATE KEY (libretro equivalent: language_value)
     "web_api_url"

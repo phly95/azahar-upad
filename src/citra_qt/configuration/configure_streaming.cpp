@@ -91,6 +91,10 @@ void ConfigureStreaming::SetConfiguration() {
         QString::fromStdString(Settings::values.streaming_target_ip.GetValue()));
     ui->target_port_spin->setValue(
         static_cast<int>(Settings::values.streaming_target_port.GetValue()));
+    ui->streaming_input_enabled_check->setChecked(
+        Settings::values.streaming_input_enabled.GetValue());
+    ui->streaming_input_port_spin->setValue(
+        static_cast<int>(Settings::values.streaming_input_port.GetValue()));
     UpdateEncoderControls(0);
 
     // Stream 2
@@ -133,6 +137,9 @@ void ConfigureStreaming::ApplyConfiguration() {
     Settings::values.streaming_target_ip = ui->target_ip_edit->text().toStdString();
     Settings::values.streaming_target_port =
         static_cast<u16>(ui->target_port_spin->value());
+    Settings::values.streaming_input_enabled = ui->streaming_input_enabled_check->isChecked();
+    Settings::values.streaming_input_port =
+        static_cast<u16>(ui->streaming_input_port_spin->value());
     if (IsVAAPI(encoder1)) {
         Settings::values.streaming_qp =
             static_cast<u32>(ui->streaming_bitrate_spin->value());

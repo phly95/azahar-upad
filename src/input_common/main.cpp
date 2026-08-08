@@ -13,6 +13,7 @@
 #include "input_common/keyboard.h"
 #include "input_common/main.h"
 #include "input_common/motion_emu.h"
+#include "input_common/network_touch.h"
 #include "input_common/sdl/sdl.h"
 #include "input_common/sdl/sdl_impl.h"
 #include "input_common/touch_from_button.h"
@@ -46,6 +47,8 @@ void Init() {
     Input::RegisterFactory<Input::MotionDevice>("motion_emu", motion_emu);
     Input::RegisterFactory<Input::TouchDevice>("touch_from_button",
                                                std::make_shared<TouchFromButtonFactory>());
+    Input::RegisterFactory<Input::TouchDevice>("network_touch",
+                                               std::make_shared<NetworkTouchFactory>());
 
     sdl = SDL::Init();
 
@@ -66,6 +69,7 @@ void Shutdown() {
     motion_emu.reset();
     Input::UnregisterFactory<Input::TouchDevice>("emu_window");
     Input::UnregisterFactory<Input::TouchDevice>("touch_from_button");
+    Input::UnregisterFactory<Input::TouchDevice>("network_touch");
     sdl.reset();
     udp.reset();
 }

@@ -70,6 +70,10 @@ struct PresentUniformData {
 static_assert(sizeof(PresentUniformData) == 112,
               "PresentUniformData does not structure in shader!");
 
+#ifdef HAVE_GSTREAMER
+class StreamControlServer;
+#endif
+
 class RendererVulkan : public VideoCore::RendererBase {
     static constexpr std::size_t PRESENT_PIPELINES = 3;
 
@@ -174,6 +178,7 @@ private:
         Settings::StreamingScreen prev_screen = Settings::StreamingScreen::Bottom;
     };
     std::array<StreamState, NUM_STREAMS> streams;
+    std::unique_ptr<StreamControlServer> stream_control_server;
 #endif
 };
 

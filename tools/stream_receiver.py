@@ -11,17 +11,27 @@ Dependencies (Python 3):
     pip install PySide6 pygobject
 and a GStreamer install with the rtph264depay / avdec_h264 plugins.
 
-Usage:
+Usage (recommended — negotiate with the emulator):
+    stream_receiver.py --azahar-host 127.0.0.1 [--screen bottom|top]
+                       [--width 640] [--height 360] [--bitrate 4000]
+
+Usage (legacy — read the emulator's config yourself):
     stream_receiver.py [--video-port 5000] [--touch-host 127.0.0.1]
                        [--touch-port 5002] [--screen bottom|top]
 
-Protocol (sent to touch-host:touch-port, 10 bytes, little-endian):
+With --azahar-host, the receiver asks azahar's control server (TCP 5003)
+which screen to stream, at what resolution/codec/bitrate, and learns the
+video/touch ports from the reply. Without it, the legacy flags are used
+and you must match the emulator's streaming configuration yourself.
+
+Touch packet protocol (sent to touch-host:touch-port, 10 bytes, LE):
     [0]     magic 0x54 ('T')
     [1]     flags: bit 0 = pressed
     [2..5]  float x, normalized 0..1 of the visible game screen
     [6..9]  float y, normalized 0..1 of the visible game screen
 """
 import argparse
+import json
 import queue
 import socket
 import struct
@@ -169,6 +179,7 @@ class ReceiverWindow(QMainWindow):
             lambda s: self.statusBar().showMessage(f"touch {s}", 3000)
         )
 
+        self.touch_host = args.touch_host or args.azahar_host or "127.0.0.1"
         self.touch_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._frame_count = 0
         self._fps_timer = QTimer(self)
@@ -238,27 +249,102 @@ class ReceiverWindow(QMainWindow):
 
     def send_touch(self, x: float, y: float, pressed: bool):
         pkt = struct.pack("<BBff", MAGIC, 1 if pressed else 0, float(x), float(y))
-        self.touch_sock.sendto(pkt, (self.args.touch_host, self.args.touch_port))
+        self.touch_sock.sendto(pkt, (self.touch_host, self.args.touch_port))
 
     def closeEvent(self, event):
         self._stop.set()
+        # Closing the control connection tells azahar to stop the negotiated
+        # stream and restore its previous settings.
+        if getattr(self, "control_sock", None) is not None:
+            try:
+                self.control_sock.close()
+            except OSError:
+                pass
         event.accept()
 
 
 def parse_args():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--video-port", type=int, default=5000, help="UDP port of the RTP video stream")
-    ap.add_argument("--touch-host", default="127.0.0.1", help="Emulator IP for touch input")
-    ap.add_argument("--touch-port", type=int, default=5002, help="Emulator UDP port for touch input")
+    ap.add_argument("--azahar-host", default=None,
+                    help="Azahar IP/hostname. If set, negotiate the stream with "
+                         "azahar's control server instead of using fixed flags")
+    ap.add_argument("--control-port", type=int, default=5003,
+                    help="Azahar control server TCP port (with --azahar-host)")
+    ap.add_argument("--video-port", type=int, default=5000,
+                    help="UDP port of the RTP video stream (legacy mode)")
+    ap.add_argument("--touch-host", default=None,
+                    help="Emulator IP for touch input (defaults to --azahar-host)")
+    ap.add_argument("--touch-port", type=int, default=5002,
+                    help="Emulator UDP port for touch input")
     ap.add_argument("--screen", choices=["bottom", "top"], default="bottom",
-                    help="Which game screen the stream shows (for letterbox mapping)")
+                    help="Screen to stream (requested in negotiation mode; "
+                         "assumed in legacy mode)")
+    ap.add_argument("--width", type=int, default=None,
+                    help="Requested stream width (negotiation mode, optional)")
+    ap.add_argument("--height", type=int, default=None,
+                    help="Requested stream height (negotiation mode, optional)")
+    ap.add_argument("--bitrate", type=int, default=None,
+                    help="Requested bitrate in kbps (negotiation mode, optional)")
     return ap.parse_args()
+
+
+def negotiate(args):
+    """Negotiate the stream with azahar's control server.
+
+    Sends the receiver's request (screen / resolution / codec / bitrate),
+    applies the negotiated video port, touch port and screen to ``args``,
+    and returns the open control socket, kept open for the session. Returns
+    None when --azahar-host is not given (legacy mode).
+    """
+    if not args.azahar_host:
+        return None
+    try:
+        sock = socket.create_connection((args.azahar_host, args.control_port), timeout=5)
+    except OSError as exc:
+        print(f"error: cannot reach azahar control server at "
+              f"{args.azahar_host}:{args.control_port}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    req = {"version": 1, "screen": args.screen, "codec": "h264"}
+    if args.width:
+        req["width"] = args.width
+    if args.height:
+        req["height"] = args.height
+    if args.bitrate:
+        req["bitrate"] = args.bitrate
+    sock.sendall((json.dumps(req) + "\n").encode())
+    line = b""
+    try:
+        while not line.endswith(b"\n"):
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            line += chunk
+        resp = json.loads(line.decode())
+    except (OSError, ValueError) as exc:
+        print(f"error: bad response from azahar control server: {exc}", file=sys.stderr)
+        sock.close()
+        sys.exit(1)
+    if not resp.get("ok"):
+        print(f"error: azahar rejected the request: {resp.get('error')}", file=sys.stderr)
+        sock.close()
+        sys.exit(1)
+    args.video_port = int(resp["video_port"])
+    args.touch_port = int(resp["touch_port"])
+    args.screen = resp["screen"]
+    if args.touch_host is None:
+        args.touch_host = args.azahar_host
+    print(f"negotiated with azahar: {resp['screen']} screen "
+          f"{resp['width']}x{resp['height']} {resp['codec']} "
+          f"video udp:{resp['video_port']} -> touch udp:{args.touch_host}:{resp['touch_port']}")
+    return sock
 
 
 def main():
     args = parse_args()
+    control_sock = negotiate(args)
     app = QApplication(sys.argv)
     win = ReceiverWindow(args)
+    win.control_sock = control_sock
     win.show()
     sys.exit(app.exec())
 

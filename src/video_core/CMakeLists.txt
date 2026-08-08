@@ -212,6 +212,8 @@ if (ENABLE_VULKAN)
             target_sources(video_core PRIVATE
                 renderer_vulkan/vk_frame_streamer.cpp
                 renderer_vulkan/vk_frame_streamer.h
+                renderer_vulkan/stream_control_server.cpp
+                renderer_vulkan/stream_control_server.h
             )
             target_link_libraries(video_core PRIVATE PkgConfig::GST)
             target_compile_definitions(video_core PRIVATE HAVE_GSTREAMER)

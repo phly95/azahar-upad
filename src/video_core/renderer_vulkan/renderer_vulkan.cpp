@@ -15,6 +15,9 @@
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_memory_util.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
+#ifdef HAVE_GSTREAMER
+#include "video_core/renderer_vulkan/stream_control_server.h"
+#endif
 
 #include "video_core/host_shaders/vulkan_present_anaglyph_frag.h"
 #include "video_core/host_shaders/vulkan_present_frag.h"
@@ -134,6 +137,9 @@ RendererVulkan::RendererVulkan(Core::System& system, Pica::PicaCore& pica_,
         secondary_present_window_ptr = std::make_unique<PresentWindow>(
             *secondary_window, instance, scheduler, IsLowRefreshRate());
     }
+#ifdef HAVE_GSTREAMER
+    stream_control_server = std::make_unique<StreamControlServer>(system);
+#endif
 }
 
 RendererVulkan::~RendererVulkan() {
@@ -143,6 +149,7 @@ RendererVulkan::~RendererVulkan() {
     device.waitIdle();
 
 #ifdef HAVE_GSTREAMER
+    stream_control_server.reset();
     for (auto& s : streams) {
         s.frame_streamer.reset();
         if (s.streaming_frame.image_view) {
